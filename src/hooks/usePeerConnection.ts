@@ -94,7 +94,6 @@ export function usePeerConnection() {
     setActiveMediaCall(call);
     setIncomingCall(incomingCall);
 
-    // Play ringtone if enabled
     if (userPreferences.soundEnabled) {
       playRingtone();
     }
