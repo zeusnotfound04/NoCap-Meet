@@ -11,6 +11,6 @@ export interface PeerConnection {
 export interface PeerData {
     type : 'chat' | 'system' | 'media-control' | 'user-info'
     payload : any ;
-    timeStamp : Date ;
+    timestamp : Date ;
     senderId: string
 }
