@@ -3,7 +3,6 @@ import { StorageManager } from '@/lib/storage';
 import { Participant, ChatMessage, Meeting } from '@/types/meeting';
 import { UserProfile, IncomingCall, CallState, Contact } from '@/types/calling';
 
-
 interface UserPreferences {
   theme: 'light' | 'dark' | 'system';
   notifications: boolean;
@@ -37,6 +36,7 @@ interface CallHistory {
   timestamp: Date;
 }
 
+
 interface MeetingStore {
   userProfile: UserProfile | null;
   contacts: Contact[];
@@ -44,6 +44,8 @@ interface MeetingStore {
   userPreferences: UserPreferences;
   deviceSettings: DeviceSettings;
   recentRooms: RecentRoom[];
+  
+  currentUserId: string | null; 
   
   currentMeeting: Meeting | null;
   participants: Participant[];
@@ -58,7 +60,7 @@ interface MeetingStore {
   screenStream: MediaStream | null;
   
   callState: CallState;
-  activeMediaCall: any; 
+  activeMediaCall: any; // PeerJS MediaConnection
   
   isChatOpen: boolean;
   isParticipantsListOpen: boolean;
@@ -70,12 +72,12 @@ interface MeetingStore {
   isOnline: boolean;
   connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error';
   
-  initializeStore: () => Promise<void>;
-  loadUserData: () => Promise<void>;
+  initializeStore: (userId?: string) => Promise<void>;
+  setCurrentUserId: (userId: string) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   
-  initializeUser: (name: string) => Promise<void>;
+  initializeUser: (name: string, userId?: string) => Promise<void>;
   updateUserProfile: (updates: Partial<UserProfile>) => Promise<void>;
   updateUserStatus: (status: UserProfile['status']) => Promise<void>;
   setMyPeerId: (peerId: string) => void;
@@ -94,9 +96,11 @@ interface MeetingStore {
   endCall: () => void;
   startOutgoingCall: (targetPeerId: string, callType?: 'video' | 'audio') => void;
   setActiveMediaCall: (call: any) => void;
+  setCallConnected: () => void; 
   updateCallDuration: () => void;
   
   addCallToHistory: (call: Omit<CallHistory, 'id'>) => Promise<void>;
+  updateCallHistory: (peerId: string, updates: Partial<Pick<CallHistory, 'name' | 'duration' | 'type'>>) => Promise<void>;
   loadCallHistory: () => Promise<void>;
   clearCallHistory: () => Promise<void>;
   
@@ -121,22 +125,35 @@ interface MeetingStore {
   
   updateUserPreferences: (prefs: Partial<UserPreferences>) => Promise<void>;
   updateDeviceSettings: (settings: Partial<DeviceSettings>) => Promise<void>;
-  loadPreferences: () => Promise<void>;
   
   addRecentRoom: (roomId: string, roomName?: string) => Promise<void>;
-  loadRecentRooms: () => Promise<void>;
   clearRecentRooms: () => Promise<void>;
   
   resetMeetingState: () => void;
   resetCallState: () => void;
   clearAllData: () => Promise<void>;
-  exportData: () => Promise<any>;
-  importData: (data: any) => Promise<void>;
 }
 
+const generateUserId = (): string => {
+  return `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+};
 
-export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
+const getOrCreateUserId = (): string => {
+  if (typeof window === 'undefined') return generateUserId();
+  
+  const stored = localStorage.getItem('nocap-meet-user-id');
+  if (stored) return stored;
+  
+  const newId = generateUserId();
+  localStorage.setItem('nocap-meet-user-id', newId);
+  return newId;
+};
 
+
+export const useMeetingStore = create<MeetingStore>((set, get) => ({
+
+  currentUserId: null,
+  
   userProfile: null,
   contacts: [],
   callHistory: [],
@@ -175,48 +192,139 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
   isChatOpen: false,
   isParticipantsListOpen: false,
   isSettingsOpen: false,
-  isLoading: true,
+  isLoading: true, // Start as loading
   error: null,
   
   myPeerId: null,
   isOnline: false,
   connectionStatus: 'connecting',
   
-  initializeStore: async () => {
-    try {
-      set({ isLoading: true, error: null });
-      await get().loadUserData();
-      await get().loadContacts();
-      await get().loadCallHistory();
-      await get().loadPreferences();
-      await get().loadRecentRooms();
-      set({ isLoading: false });
-      console.log(' Store initialized successfully');
-    } catch (error) {
-      console.error(' Failed to initialize store:', error);
-      set({ isLoading: false, error: 'Failed to initialize app' });
+  
+  setCurrentUserId: (userId: string) => {
+    set({ currentUserId: userId });
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('nocap-meet-user-id', userId);
     }
   },
   
-  loadUserData: async () => {
+  initializeStore: async (userId?: string) => {
     try {
-      const profile = await StorageManager.getUserProfile();
-      if (profile) {
-        set({ userProfile: profile });
+      set({ isLoading: true, error: null });
+      
+      const actualUserId = userId || getOrCreateUserId();
+      set({ currentUserId: actualUserId });
+      
+      
+      try {
+        await StorageManager.initializeStorage();
+        console.log(' Store: Redis storage ready');
+      } catch (storageError) {
+        console.warn(' Store: Redis initialization failed, using in-memory defaults:', storageError);
+   
+        set({ 
+          isLoading: false, 
+          error: null,
+          userProfile: null,
+          contacts: [],
+          userPreferences: {
+            theme: 'light',
+            notifications: true,
+            autoAcceptCalls: false,
+            defaultCallType: 'video',
+            soundEnabled: true,
+          }
+        });
+        return;
       }
+      
+      const createTimeoutPromise = (ms: number) => new Promise((_, reject) => 
+        setTimeout(() => reject(new Error(`Operation timeout after ${ms}ms`)), ms)
+      );
+      
+      console.log(' Store: Loading user profile...');
+      const profile = await Promise.race([
+        StorageManager.getUserProfile(actualUserId),
+        createTimeoutPromise(3000)
+      ]).catch(error => {
+        console.warn(' Store: Failed to load profile:', error);
+        return null;
+      });
+      
+      console.log(' Store: Loading contacts...');
+      const contacts = await Promise.race([
+        StorageManager.getContacts(actualUserId),
+        createTimeoutPromise(3000)
+      ]).catch(error => {
+        console.warn(' Store: Failed to load contacts:', error);
+        return [] as Contact[];
+      });
+      
+      const preferences = await Promise.race([
+        StorageManager.getUserPreferences(actualUserId),
+        createTimeoutPromise(3000)
+      ]).catch(error => {
+        console.warn(' Store: Failed to load preferences:', error);
+        return {
+          theme: 'light' as const,
+          notifications: true,
+          autoAcceptCalls: false,
+          defaultCallType: 'video' as const,
+          soundEnabled: true,
+        };
+      });
+      
+      console.log(' Store: Data loaded - profile:', !!profile, 'contacts:', (contacts as Contact[]).length || 0, 'preferences:', !!preferences);
+      
+      const updates: Partial<MeetingStore> = {
+        userProfile: profile as UserProfile | null,
+        contacts: (contacts as Contact[]) || [],
+        userPreferences: preferences || get().userPreferences,
+        isLoading: false,
+      };
+      
+      set(updates);
+      
+      console.log(' Store: Initialization complete');
+      
+      setTimeout(() => {
+        get().loadCallHistory().catch(console.warn);
+      }, 100);
+      
     } catch (error) {
-      console.error(' Failed to load user data:', error);
+      console.error(' Store: Initialization failed:', error);
+      
+      set({ 
+        isLoading: false, 
+        error: null, 
+        userProfile: null,
+        contacts: [],
+        userPreferences: {
+          theme: 'light',
+          notifications: true,
+          autoAcceptCalls: false,
+          defaultCallType: 'video',
+          soundEnabled: true,
+        }
+      });
+      
+      console.log(' Store: Using default values due to storage error');
     }
   },
   
   setLoading: (loading: boolean) => set({ isLoading: loading }),
   setError: (error: string | null) => set({ error }),
   
-  // ===== USER PROFILE ACTIONS =====
   
-  initializeUser: async (name: string) => {
+  initializeUser: async (name: string, userId?: string) => {
     try {
-      const existingProfile = await StorageManager.getUserProfile();
+      console.log(' Store: Initializing user:', name);
+      
+      const actualUserId = userId || get().currentUserId || getOrCreateUserId();
+      if (!get().currentUserId) {
+        set({ currentUserId: actualUserId });
+      }
+      
+      const existingProfile = get().userProfile;
       
       let profile: UserProfile;
       if (existingProfile) {
@@ -228,7 +336,7 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
         };
       } else {
         profile = {
-          peerId: '', // Will be set when peer connects
+          peerId: '', // Will be set by peer context
           name: name.trim(),
           status: 'online',
           isAcceptingCalls: true,
@@ -236,11 +344,11 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
         };
       }
       
-      await StorageManager.setUserProfile(profile);
+      await StorageManager.setUserProfile(profile, actualUserId);
       set({ userProfile: profile });
-      console.log(` User initialized: ${name}`);
+      
     } catch (error) {
-      console.error(' Failed to initialize user:', error);
+      console.error(' Store: Failed to initialize user:', error);
       set({ error: 'Failed to save user profile' });
     }
   },
@@ -248,26 +356,29 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
   updateUserProfile: async (updates: Partial<UserProfile>) => {
     try {
       const current = get().userProfile;
-      if (current) {
+      const userId = get().currentUserId;
+      if (current && userId) {
         const updated = { ...current, ...updates };
-        await StorageManager.setUserProfile(updated);
+        await StorageManager.setUserProfile(updated, userId);
         set({ userProfile: updated });
-        console.log(' User profile updated');
       }
     } catch (error) {
-      console.error(' Failed to update user profile:', error);
+      console.error(' Store: Failed to update user profile:', error);
     }
   },
   
   updateUserStatus: async (status: UserProfile['status']) => {
     try {
-      await StorageManager.updateUserStatus(status);
-      const profile = get().userProfile;
-      if (profile) {
-        set({ userProfile: { ...profile, status, lastSeen: new Date() } });
+      const userId = get().currentUserId;
+      if (userId) {
+        await StorageManager.updateUserStatus(status, userId);
+        const profile = get().userProfile;
+        if (profile) {
+          set({ userProfile: { ...profile, status, lastSeen: new Date() } });
+        }
       }
     } catch (error) {
-      console.error(' Failed to update user status:', error);
+      console.error(' Store: Failed to update user status:', error);
     }
   },
   
@@ -275,9 +386,10 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
     set({ myPeerId: peerId });
     
     const profile = get().userProfile;
-    if (profile && profile.peerId !== peerId) {
+    const userId = get().currentUserId;
+    if (profile && userId && profile.peerId !== peerId) {
       const updated = { ...profile, peerId };
-      StorageManager.setUserProfile(updated);
+      StorageManager.setUserProfile(updated, userId);
       set({ userProfile: updated });
     }
   },
@@ -301,6 +413,11 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
   
   addContact: async (peerId: string, name: string) => {
     try {
+      const userId = get().currentUserId;
+      if (!userId) {
+        throw new Error('No user ID available');
+      }
+      
       const newContact: Contact = {
         peerId,
         name: name.trim(),
@@ -308,64 +425,79 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
         isFavorite: false,
       };
       
-      await StorageManager.addContact(newContact);
-      await get().loadContacts();
-      console.log(` Contact added: ${name}`);
+      await StorageManager.addContact(newContact, userId);
+      
+      const contacts = get().contacts;
+      const updated = [newContact, ...contacts.filter(c => c.peerId !== peerId)];
+      set({ contacts: updated });
+      
     } catch (error) {
-      console.error(' Failed to add contact:', error);
+      console.error('❌ Store: Failed to add contact:', error);
       set({ error: 'Failed to add contact' });
     }
   },
   
   removeContact: async (peerId: string) => {
     try {
-      await StorageManager.removeContact(peerId);
-      await get().loadContacts();
-      console.log(` Contact removed: ${peerId}`);
+      const userId = get().currentUserId;
+      if (!userId) {
+        throw new Error('No user ID available');
+      }
+      
+      await StorageManager.removeContact(peerId, userId);
+      
+      const contacts = get().contacts;
+      set({ contacts: contacts.filter(c => c.peerId !== peerId) });
+      
     } catch (error) {
-      console.error(' Failed to remove contact:', error);
+      console.error(' Store: Failed to remove contact:', error);
     }
   },
   
   updateContact: async (peerId: string, updates: Partial<Contact>) => {
     try {
+      const userId = get().currentUserId;
+      if (!userId) return;
+      
       const contacts = get().contacts;
-      const updated = contacts.map((c: any) => 
+      const updated = contacts.map(c => 
         c.peerId === peerId ? { ...c, ...updates } : c
       );
       
-      const updatedContact = updated.find((c: any) => c.peerId === peerId);
+      const updatedContact = updated.find(c => c.peerId === peerId);
       if (updatedContact) {
-        await StorageManager.addContact(updatedContact);
+        await StorageManager.addContact(updatedContact, userId);
         set({ contacts: updated });
-        console.log(` Contact updated: ${peerId}`);
-      } else {
-        console.warn(` Contact not found: ${peerId}`);
       }
     } catch (error) {
-      console.error(' Failed to update contact:', error);
+      console.error(' Store: Failed to update contact:', error);
     }
   },
   
   toggleContactFavorite: async (peerId: string) => {
     try {
-      await StorageManager.toggleContactFavorite(peerId);
+      const userId = get().currentUserId;
+      if (!userId) return;
+      
+      await StorageManager.toggleContactFavorite(peerId, userId);
       await get().loadContacts();
     } catch (error) {
-      console.error(' Failed to toggle favorite:', error);
+      console.error(' Store: Failed to toggle favorite:', error);
     }
   },
   
   loadContacts: async () => {
     try {
-      const contacts = await StorageManager.getContacts();
+      const userId = get().currentUserId;
+      if (!userId) return;
+      
+      const contacts = await StorageManager.getContacts(userId);
       set({ contacts });
     } catch (error) {
-      console.error(' Failed to load contacts:', error);
+      console.error(' Store: Failed to load contacts:', error);
     }
   },
   
-  // ===== CALL MANAGEMENT =====
   
   setIncomingCall: (call: IncomingCall) => {
     set({
@@ -375,11 +507,6 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
         currentCall: call,
       }
     });
-    
-    const { userPreferences } = get();
-    if (userPreferences.soundEnabled) {
-      console.log(' Incoming call ringtone');
-    }
   },
   
   acceptCall: () => {
@@ -394,7 +521,6 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
           callDuration: 0,
         }
       });
-      console.log(' Call accepted');
     }
   },
   
@@ -411,7 +537,6 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
     }
     
     get().resetCallState();
-    console.log(' Call rejected');
   },
   
   endCall: async () => {
@@ -429,18 +554,10 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
         timestamp: callState.callStartTime,
       });
       
-      await StorageManager.updateLastCall(callState.currentCall.callerPeerId);
-    }
-    
-    const { localStream, screenStream, activeMediaCall } = get();
-    if (localStream) {
-      localStream.getTracks().forEach((track: any) => track.stop());
-    }
-    if (screenStream) {
-      screenStream.getTracks().forEach((track: any) => track.stop());
-    }
-    if (activeMediaCall) {
-      activeMediaCall.close();
+      const userId = get().currentUserId;
+      if (userId) {
+        await StorageManager.updateLastCall(callState.currentCall.callerPeerId, userId);
+      }
     }
     
     get().resetCallState();
@@ -452,15 +569,10 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
       isVideoMuted: false,
       isScreenSharing: false,
     });
-    
-    console.log(' Call ended');
   },
   
   startOutgoingCall: (targetPeerId: string, callType: 'video' | 'audio' = 'video') => {
-
-    console.log(` Starting ${callType} call to:`, targetPeerId);
-    
-    const contact = get().contacts.find((c: any) => c.peerId === targetPeerId);
+    const contact = get().contacts.find(c => c.peerId === targetPeerId);
     get().addCallToHistory({
       peerId: targetPeerId,
       name: contact?.name || 'Unknown',
@@ -471,6 +583,19 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
   },
   
   setActiveMediaCall: (call: any) => set({ activeMediaCall: call }),
+
+  setCallConnected: () => {
+    const callState = get().callState;
+    set({
+      callState: {
+        ...callState,
+        isInCall: true,
+        callStartTime: new Date(),
+        callDuration: 0,
+      }
+    });
+    console.log(' Store: Call marked as connected, timer started');
+  },
   
   updateCallDuration: () => {
     const callState = get().callState;
@@ -485,170 +610,178 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
   
   addCallToHistory: async (call: Omit<CallHistory, 'id'>) => {
     try {
-      await StorageManager.addCallToHistory(call);
-      await get().loadCallHistory();
+      const userId = get().currentUserId;
+      if (!userId) return;
+      
+      await StorageManager.addCallToHistory(call, userId);
+      
+      const history = get().callHistory;
+      const newCall = {
+        id: `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        ...call
+      };
+      set({ callHistory: [newCall, ...history].slice(0, 50) });
     } catch (error) {
-      console.error(' Failed to add call to history:', error);
+      console.error(' Store: Failed to add call to history:', error);
+    }
+  },
+
+  updateCallHistory: async (peerId: string, updates: Partial<Pick<CallHistory, 'name' | 'duration' | 'type'>>) => {
+    try {
+      const userId = get().currentUserId;
+      if (!userId) return;
+
+      const history = get().callHistory;
+      const updatedHistory = history.map(call => {
+        if (call.peerId === peerId && 
+            (call.name === 'Calling...' || updates.duration !== undefined)) {
+          return { ...call, ...updates };
+        }
+        return call;
+      });
+
+      set({ callHistory: updatedHistory });
+      
+      await StorageManager.updateCallHistory(userId, peerId, updates);
+    } catch (error) {
+      console.error(' Store: Failed to update call history:', error);
     }
   },
   
   loadCallHistory: async () => {
     try {
-      const history = await StorageManager.getCallHistory();
+      const userId = get().currentUserId;
+      if (!userId) return;
+      
+      const history = await StorageManager.getCallHistory(userId);
       set({ callHistory: history });
     } catch (error) {
-      console.error(' Failed to load call history:', error);
+      console.error(' Store: Failed to load call history:', error);
     }
   },
   
   clearCallHistory: async () => {
     try {
-      await StorageManager.clearCallHistory();
+      const userId = get().currentUserId;
+      if (!userId) return;
+      
+      await StorageManager.clearCallHistory(userId);
       set({ callHistory: [] });
     } catch (error) {
-      console.error(' Failed to clear call history:', error);
+      console.error(' Store: Failed to clear call history:', error);
     }
   },
   
-  
   setCurrentMeeting: (meeting: Meeting | null) => set({ currentMeeting: meeting }),
   
-  addParticipant: (participant: Participant) => set((state : any) => ({
+  addParticipant: (participant: Participant) => set((state) => ({
     participants: [...state.participants, participant]
   })),
   
-  removeParticipant: (participantId: string) => set((state: any) => ({
-    participants: state.participants.filter((p: any) => p.id !== participantId)
+  removeParticipant: (participantId: string) => set((state) => ({
+    participants: state.participants.filter(p => p.id !== participantId)
   })),
   
-  updateParticipant: (participantId: string, updates: Partial<Participant>) => set((state: any) => ({
-    participants: state.participants.map((p : any)=> 
+  updateParticipant: (participantId: string, updates: Partial<Participant>) => set((state) => ({
+    participants: state.participants.map(p => 
       p.id === participantId ? { ...p, ...updates } : p
     )
   })),
   
   setCurrentUser: (user: Participant) => set({ currentUser: user }),
   
-  
-  addMessage: (message: ChatMessage) => set((state : any) => ({
+  addMessage: (message: ChatMessage) => set((state) => ({
     messages: [...state.messages, message]
   })),
   
   clearMessages: () => set({ messages: [] }),
   
-  toggleChat: () => set((state: any) => ({ 
+  toggleChat: () => set((state) => ({ 
     isChatOpen: !state.isChatOpen 
   })),
   
   toggleAudio: () => {
     const isAudioMuted = !get().isAudioMuted;
     set({ isAudioMuted });
-    
-    const { localStream } = get();
-    if (localStream) {
-      localStream.getAudioTracks().forEach((track : any) => {
-        track.enabled = !isAudioMuted;
-      });
-    }
-    
-    console.log(` Audio ${isAudioMuted ? 'muted' : 'unmuted'}`);
   },
   
   toggleVideo: () => {
     const isVideoMuted = !get().isVideoMuted;
     set({ isVideoMuted });
-    
-    const { localStream } = get();
-    if (localStream) {
-      localStream.getVideoTracks().forEach((track : any)=> {
-        track.enabled = !isVideoMuted;
-      });
-    }
-    
-    console.log(`📹 Video ${isVideoMuted ? 'disabled' : 'enabled'}`);
   },
   
   toggleScreenShare: () => {
     const isScreenSharing = !get().isScreenSharing;
     set({ isScreenSharing });
-    console.log(` Screen sharing ${isScreenSharing ? 'started' : 'stopped'}`);
   },
   
   setLocalStream: (stream: MediaStream | null) => set({ localStream: stream }),
   setScreenStream: (stream: MediaStream | null) => set({ screenStream: stream }),
   
   
-  toggleParticipantsList: () => set((state : any) => ({ 
+  toggleParticipantsList: () => set((state) => ({ 
     isParticipantsListOpen: !state.isParticipantsListOpen 
   })),
   
-  toggleSettings: () => set((state : any) => ({ 
+  toggleSettings: () => set((state) => ({ 
     isSettingsOpen: !state.isSettingsOpen 
   })),
   
+  
   updateUserPreferences: async (prefs: Partial<UserPreferences>) => {
     try {
+      const userId = get().currentUserId;
+      if (!userId) return;
+      
       const current = get().userPreferences;
       const updated = { ...current, ...prefs };
       
-      await StorageManager.setUserPreferences(updated);
+      await StorageManager.setUserPreferences(updated, userId);
       set({ userPreferences: updated });
-      console.log(' Preferences updated');
     } catch (error) {
-      console.error(' Failed to update preferences:', error);
+      console.error(' Store: Failed to update preferences:', error);
     }
   },
   
   updateDeviceSettings: async (settings: Partial<DeviceSettings>) => {
     try {
+      const userId = get().currentUserId;
+      if (!userId) return;
+      
       const current = get().deviceSettings;
       const updated = { ...current, ...settings };
       
-      await StorageManager.setDeviceSettings(updated);
+      await StorageManager.setDeviceSettings(updated, userId);
       set({ deviceSettings: updated });
-      console.log(' Device settings updated');
     } catch (error) {
-      console.error(' Failed to update device settings:', error);
+      console.error(' Store: Failed to update device settings:', error);
     }
   },
   
-  loadPreferences: async () => {
-    try {
-      const [userPrefs, deviceSettings] = await Promise.all([
-        StorageManager.getUserPreferences(),
-        StorageManager.getDeviceSettings()
-      ]);
-      
-      set({ userPreferences: userPrefs, deviceSettings });
-    } catch (error) {
-      console.error(' Failed to load preferences:', error);
-    }
-  },
+  // ===== RECENT ROOMS =====
   
   addRecentRoom: async (roomId: string, roomName?: string) => {
     try {
-      await StorageManager.addToRecentRooms(roomId, roomName);
-      await get().loadRecentRooms();
-    } catch (error) {
-      console.error(' Failed to add recent room:', error);
-    }
-  },
-  
-  loadRecentRooms: async () => {
-    try {
-      const rooms = await StorageManager.getRecentRooms();
+      const userId = get().currentUserId;
+      if (!userId) return;
+      
+      await StorageManager.addToRecentRooms(roomId, userId, roomName);
+      const rooms = await StorageManager.getRecentRooms(userId);
       set({ recentRooms: rooms });
     } catch (error) {
-      console.error(' Failed to load recent rooms:', error);
+      console.error(' Store: Failed to add recent room:', error);
     }
   },
   
   clearRecentRooms: async () => {
     try {
-      await StorageManager.clearRecentRooms();
+      const userId = get().currentUserId;
+      if (!userId) return;
+      
+      await StorageManager.clearRecentRooms(userId);
       set({ recentRooms: [] });
     } catch (error) {
-      console.error(' Failed to clear recent rooms:', error);
+      console.error(' Store: Failed to clear recent rooms:', error);
     }
   },
   
@@ -662,7 +795,6 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
       isChatOpen: false,
       isParticipantsListOpen: false,
     });
-    console.log(' Meeting state reset');
   },
   
   resetCallState: () => {
@@ -678,7 +810,11 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
   
   clearAllData: async () => {
     try {
-      await StorageManager.clearAllData();
+      const userId = get().currentUserId;
+      if (!userId) return;
+      
+      await StorageManager.clearAllData(userId);
+
       set({
         userProfile: null,
         contacts: [],
@@ -696,29 +832,8 @@ export const useMeetingStore = create<MeetingStore>((set: any, get : any) => ({
           audioQuality: 'high',
         },
       });
-      console.log(' All data cleared');
     } catch (error) {
-      console.error(' Failed to clear all data:', error);
-    }
-  },
-  
-  exportData: async () => {
-    try {
-      return await StorageManager.exportAllData();
-    } catch (error) {
-      console.error(' Failed to export data:', error);
-      return {};
-    }
-  },
-  
-  importData: async (data: any) => {
-    try {
-      await StorageManager.importAllData(data);
-      await get().initializeStore();
-      console.log(' Data imported successfully');
-    } catch (error) {
-      console.error(' Failed to import data:', error);
-      set({ error: 'Failed to import data' });
+      console.error(' Store: Failed to clear all data:', error);
     }
   },
 }));
