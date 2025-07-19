@@ -60,7 +60,7 @@ interface MeetingStore {
   screenStream: MediaStream | null;
   
   callState: CallState;
-  activeMediaCall: any; // PeerJS MediaConnection
+  activeMediaCall: any;
   
   isChatOpen: boolean;
   isParticipantsListOpen: boolean;
@@ -192,7 +192,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
   isChatOpen: false,
   isParticipantsListOpen: false,
   isSettingsOpen: false,
-  isLoading: true, // Start as loading
+  isLoading: true,
   error: null,
   
   myPeerId: null,

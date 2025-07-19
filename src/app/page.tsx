@@ -9,6 +9,8 @@ import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { IncomingCallModal } from '@/components/IncomingCallModal';
 import { CallInterface } from '@/components/CallInterface';
 import { CallStatus } from '@/components/CallStatus';
+import { ChatWindow } from '@/components/ChatWindow';
+import { ChatToggleButton } from '@/components/ChatToggleButton';
 import { getPeerIdInfo, formatNextChangeDate } from '@/utils/peerIdUtils';
 import { 
   Video, 
@@ -625,6 +627,10 @@ export default function NocapMeetHomePage() {
       {/* Call-related Modals/Overlays */}
       <IncomingCallModal />
       <CallInterface />
+      
+      {/* Chat System */}
+      <ChatToggleButton />
+      <ChatWindow />
     </div>
   );
 }

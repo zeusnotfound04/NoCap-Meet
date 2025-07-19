@@ -47,6 +47,10 @@ interface PeerContextType {
   
   reconnect: () => void;
   initializePeerWithName: (userName: string) => void;
+  
+  // Utility functions
+  testRingtone: () => void;
+  stopRingtone: () => void;
 }
 
 
@@ -58,6 +62,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   const peerRef = useRef<Peer | null>(null);
   const chatConn = useRef<DataConnection | null>(null);
   const activeCallRef = useRef<MediaConnection | null>(null);
+  const ringtoneAudioRef = useRef<HTMLAudioElement | null>(null);
   
   const [status, setStatus] = useState<PeerStatus>({ type: "waiting_for_name" });
   const [incomingCall, setIncomingCall] = useState<MediaConnection | null>(null);
@@ -124,7 +129,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     constraints?: MediaStreamConstraints
   ): Promise<MediaStream | null> => {
     if (localStream) {
-      return localStream; // Return existing stream
+      return localStream;
     }
     return await getMediaPermissions(constraints);
   }, [localStream, getMediaPermissions]);
@@ -203,7 +208,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       });
 
       activeCallRef.current = call;
-      setIncomingCall(call); // Use same ref for consistency
+      setIncomingCall(call);
       setupCallEventHandlers(call);
 
       currentCallPeerId.current = targetPeerId;
@@ -230,6 +235,9 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       console.error('No incoming call to accept');
       return;
     }
+
+    // Stop the ringtone when accepting the call
+    stopNotificationSound();
 
     try {
       let stream = localStream;
@@ -258,7 +266,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         setupDataConnection(dataConn);
       }
 
-      // Update store
       storeAcceptCall();
       setStatus({ type: "in_call" });
       
@@ -270,6 +277,9 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const rejectCall = useCallback(() => {
     if (!incomingCall) return;
+
+    // Stop the ringtone when rejecting the call
+    stopNotificationSound();
 
     incomingCall.close();
     
@@ -289,6 +299,8 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [incomingCall, updateCallHistory]);
 
   const endCall = useCallback(() => {
+    // Stop any ringtone that might still be playing
+    stopNotificationSound();
 
     if (activeCallRef.current) {
       activeCallRef.current.close();
@@ -353,7 +365,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       
       if (!callStartTime.current) {
         callStartTime.current = new Date();
-        setCallConnected(); // Update store with call start time
+        setCallConnected();
         
         if (currentCallPeerId.current) {
           const contact = contacts.find(c => c.peerId === currentCallPeerId.current);
@@ -391,16 +403,32 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const setupDataConnection = useCallback((conn: DataConnection) => {
     conn.on('open', () => {
-      console.log('Chat connection opened');
+      console.log(' Chat connection opened with:', conn.peer);
     });
 
     conn.on('data', (data: unknown) => {
-      console.log('Received chat data:', data);
       
       if (typeof data === 'object' && data !== null && 'type' in data) {
         const peerData = data as PeerData;
+        
+        if (peerData.type === 'chat' && peerData.payload?.message) {
+          
+          const chatMessage = {
+            id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            senderId: peerData.senderId || conn.peer,
+            senderName: peerData.payload.senderName || 'Unknown',
+            message: peerData.payload.message,
+            timestamp: new Date(peerData.timestamp),
+            type: 'text' as const,
+          };
+          
+          const { addMessage } = useMeetingStore.getState();
+          addMessage(chatMessage);
+          
+          console.log(' Chat message added to store:', chatMessage);
+        }
       } else {
-        console.warn('Received invalid chat data format:', data);
+        console.warn(' Received invalid chat data format:', data);
       }
     });
 
@@ -416,36 +444,61 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const sendChatMessage = useCallback((message: string, targetPeerId?: string): boolean => {
     if (!chatConn.current || !chatConn.current.open) {
-      console.warn('No active chat connection');
       return false;
     }
 
     if (!userProfile) {
-      console.warn('No user profile for chat');
       return false;
     }
 
-    const chatData: PeerData = {
-      type: 'chat',
-      payload: {
-        message,
-        senderName: userProfile.name,
-      },
-      timestamp: new Date(),
-      senderId: myPeerId || '',
-    };
+    if (!message.trim()) {
+      return false;
+    }
 
     try {
+      const chatData: PeerData = {
+        type: 'chat',
+        payload: {
+          message: message.trim(),
+          senderName: userProfile.name,
+        },
+        timestamp: new Date(),
+        senderId: myPeerId || '',
+      };
+
       chatConn.current.send(chatData);
+
+      const localMessage = {
+        id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        senderId: myPeerId || '',
+        senderName: userProfile.name,
+        message: message.trim(),
+        timestamp: new Date(),
+        type: 'text' as const,
+      };
+
+      const { addMessage } = useMeetingStore.getState();
+      addMessage(localMessage);
+
+      console.log(' Chat message sent:', message.trim());
       return true;
     } catch (error) {
-      console.error(' Nocap-Meet: Failed to send chat message:', error);
+      console.error(' Failed to send chat message:', error);
       return false;
     }
   }, [userProfile, myPeerId]);
 
 
   const initializePeer = useCallback((customName?: string) => {
+    if (peerRef.current) {
+      try {
+        peerRef.current.destroy();
+      } catch (error) {
+        console.warn(' Error destroying existing peer:', error);
+      }
+      peerRef.current = null;
+    }
+
     setStatus({ type: "connecting" });
 
     const generateCustomPeerId = (): string => {
@@ -561,40 +614,100 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     });
 
     peer.on('error', (error: any) => {
+      console.error('🔥 PeerJS Error:', error);
+      
       if (error.type === 'unavailable-id') {
-        const userName = userProfile?.name || 'user';
+        console.log('🔄 ID taken, generating new one with random suffix...');
+        
+        const userName = customName || userProfile?.name || 'user';
         const cleanName = userName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'user';
         
-        const now = new Date();
-        const startOfYear = new Date(now.getFullYear(), 0, 1);
-        const dayOfYear = Math.floor((now.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24));
-        const threeDayPeriod = Math.floor(dayOfYear / 3);
+        const timestamp = Date.now().toString().slice(-4);
+        const randomSuffix = Math.floor(Math.random() * 999) + 100;
+        const newPeerId = `${cleanName}_${timestamp}_${randomSuffix}`;
         
-        let hash = 0;
-        for (let i = 0; i < cleanName.length; i++) {
-          const char = cleanName.charCodeAt(i);
-          hash = ((hash << 5) - hash) + char;
-          hash = hash & hash;
-        }
-        
-        const baseNumber = (threeDayPeriod * 1000 + Math.abs(hash) % 1000) % 9000 + 1000;
-        
-        const suffix = Math.floor(Math.random() * 99);
-        const newPeerId = `${cleanName}_${baseNumber}_${suffix}`;
+        console.log('🆔 Retrying with new peer ID:', newPeerId);
         
         if (peerRef.current) {
           peerRef.current.destroy();
+          peerRef.current = null;
         }
         
         setTimeout(() => {
           const newPeer = new Peer(newPeerId, PEER_CONFIG);
           peerRef.current = newPeer;
+          
           newPeer.on('open', (retryPeerId) => {
             setMyPeerId(retryPeerId);
             setStorePeerId(retryPeerId);
             setConnectionStatus('connected');
             setStatus({ type: "connected" });
           });
+          
+          newPeer.on('call', (call) => {
+            
+            if (activeCallRef.current || incomingCall) {
+              call.close();
+              return;
+            }
+
+            setIncomingCall(call);
+            setupCallEventHandlers(call);
+            setStatus({ type: "incoming_call" });
+
+            if (userPreferences.soundEnabled) {
+              playNotificationSound();
+            }
+
+            const incomingCallData: IncomingCall = {
+              callId: `call-${Date.now()}`,
+              callerPeerId: call.peer,
+              callerName: call.metadata?.callerName || 'Unknown',
+              callerAvatar: call.metadata?.callerAvatar,
+              timestamp: new Date(),
+              type: call.metadata?.callType || 'video',
+            };
+            setStoreIncomingCall(incomingCallData);
+            
+            addCallToHistory({
+              peerId: call.peer,
+              name: call.metadata?.callerName || 'Unknown Caller',
+              type: 'incoming',
+              callType: call.metadata?.callType || 'video',
+              timestamp: new Date(),
+            });
+          });
+
+          newPeer.on('connection', (conn) => {
+            if (conn.label === "call_rejected") {
+              conn.close();
+              setStatus({ type: "error", error: "Call was declined" });
+              return;
+            }
+            
+            if (conn.label === "chat") {
+              chatConn.current = conn;
+              setupDataConnection(conn);
+            }
+          });
+
+          newPeer.on('disconnected', () => {
+            console.log('🔌 Peer disconnected');
+            setStatus({ type: "idle" });
+            setConnectionStatus('disconnected');
+          });
+
+          newPeer.on('close', () => {
+            setStatus({ type: "idle" });
+            setConnectionStatus('disconnected');
+          });
+
+          newPeer.on('error', (retryError: any) => {
+            console.error('🔥 Retry peer error:', retryError);
+            setStatus({ type: "error", error: retryError.message || "Connection failed" });
+            setConnectionStatus('error');
+          });
+          
         }, 1000);
         
         return;
@@ -674,23 +787,82 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       }
       
+      // Stop any playing ringtone
+      if (ringtoneAudioRef.current) {
+        ringtoneAudioRef.current.pause();
+        ringtoneAudioRef.current.currentTime = 0;
+        ringtoneAudioRef.current = null;
+      }
+      
       setStatus({ type: "idle" });
     };
   }, [userProfile?.name, initializePeer]); 
 
 
   const playNotificationSound = useCallback(() => {
+    if (!userPreferences.soundEnabled) {
+      console.log('🔇 Ringtone disabled in user preferences');
+      return;
+    }
+
     try {
-      const audio = new Audio('/meeting-sounds/notification.mp3');
-      audio.loop = true;
-      audio.play().catch(console.warn);
+      // Stop any existing ringtone first
+      if (ringtoneAudioRef.current) {
+        ringtoneAudioRef.current.pause();
+        ringtoneAudioRef.current.currentTime = 0;
+      }
+
+      // Create new audio instance for the ringtone
+      const audio = new Audio('/ringtone.mp3');
+      ringtoneAudioRef.current = audio;
       
+      // Configure the audio
+      audio.loop = true;
+      audio.volume = 0.7; // Set volume to 70%
+      
+      // Add event listeners for better feedback
+      audio.addEventListener('canplaythrough', () => {
+        console.log('🔊 Ringtone loaded and ready to play');
+      });
+      
+      audio.addEventListener('play', () => {
+        console.log('🔊 Incoming call ringtone started playing...');
+      });
+      
+      audio.addEventListener('error', (e) => {
+        console.error('❌ Error loading ringtone:', e);
+      });
+      
+      // Play the ringtone
+      audio.play().catch(error => {
+        console.warn('🔊 Could not play ringtone (may need user interaction first):', error);
+      });
+      
+      // Auto-stop after 30 seconds as a safety measure
       setTimeout(() => {
-        audio.pause();
-        audio.currentTime = 0;
+        if (ringtoneAudioRef.current === audio) {
+          audio.pause();
+          audio.currentTime = 0;
+          ringtoneAudioRef.current = null;
+          console.log('🔇 Ringtone auto-stopped after 30 seconds');
+        }
       }, 30000);
+      
     } catch (error) {
-      console.warn('  Could not play notification:', error);
+      console.warn('❌ Error playing incoming call ringtone:', error);
+    }
+  }, [userPreferences.soundEnabled]);
+
+  const stopNotificationSound = useCallback(() => {
+    try {
+      if (ringtoneAudioRef.current) {
+        ringtoneAudioRef.current.pause();
+        ringtoneAudioRef.current.currentTime = 0;
+        ringtoneAudioRef.current = null;
+        console.log('🔇 Ringtone stopped');
+      }
+    } catch (error) {
+      console.warn('❌ Error stopping ringtone:', error);
     }
   }, []);
 
@@ -705,20 +877,18 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     remoteStream,
     isConnected: status.type === "connected" || status.type === "in_call" || status.type === "calling_peer",
     myPeerId,
-    
     makeCall,
     acceptCall,
     rejectCall,
     endCall,
-    
     toggleAudio,
     toggleVideo,
     initializeMedia,
-    
     sendChatMessage,
-    
     reconnect,
     initializePeerWithName,
+    testRingtone: playNotificationSound,
+    stopRingtone: stopNotificationSound,
   };
 
   return (

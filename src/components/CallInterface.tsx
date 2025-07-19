@@ -16,6 +16,8 @@ import {
   Maximize,
   Minimize
 } from 'lucide-react';
+import { ChatWindow } from './ChatWindow';
+import { ChatToggleButton } from './ChatToggleButton';
 
 export function CallInterface() {
   const { 
@@ -25,10 +27,10 @@ export function CallInterface() {
     endCall, 
     localStream, 
     remoteStream,
-    incomingCall 
+    incomingCall
   } = usePeer();
   
-  const { callState } = useMeetingStore();
+  const { callState, isChatOpen, toggleChat, messages } = useMeetingStore();
   
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isVideoMuted, setIsVideoMuted] = useState(false);
@@ -196,24 +198,20 @@ export function CallInterface() {
             {isVideoMuted ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
           </Button>
 
+       
           <Button
             variant="secondary"
             size="lg"
-            disabled
-            className="rounded-full w-14 h-14 p-0 opacity-50"
-            title="Screen share (coming soon)"
-          >
-            <Monitor className="w-6 h-6" />
-          </Button>
-
-          <Button
-            variant="secondary"
-            size="lg"
-            disabled
-            className="rounded-full w-14 h-14 p-0 opacity-50"
-            title="Chat (coming soon)"
+            onClick={toggleChat}
+            className="rounded-full w-14 h-14 p-0 relative"
+            title="Toggle chat"
           >
             <MessageSquare className="w-6 h-6" />
+            {messages.length > 0 && !isChatOpen && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                {messages.length}
+              </span>
+            )}
           </Button>
 
           <Button
@@ -231,6 +229,12 @@ export function CallInterface() {
           <p>Call with {callerName} • {formatDuration(callDuration)}</p>
         </div>
       </div>
+
+      {/* Chat Window */}
+      {isChatOpen && <ChatWindow />}
+
+      {/* Chat Toggle Button (alternative placement if needed) */}
+      <ChatToggleButton />
     </div>
   );
 }
