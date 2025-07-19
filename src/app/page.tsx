@@ -9,6 +9,7 @@ import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { IncomingCallModal } from '@/components/IncomingCallModal';
 import { CallInterface } from '@/components/CallInterface';
 import { CallStatus } from '@/components/CallStatus';
+import { getPeerIdInfo, formatNextChangeDate } from '@/utils/peerIdUtils';
 import { 
   Video, 
   Phone, 
@@ -21,7 +22,8 @@ import {
   Wifi,
   WifiOff,
   PhoneCall,
-  Database
+  Database,
+  Info
 } from 'lucide-react';
 
 export default function NocapMeetHomePage() {
@@ -30,6 +32,7 @@ export default function NocapMeetHomePage() {
   const [contactName, setContactName] = useState('');
   const [userIdInput, setUserIdInput] = useState(''); 
   const [isCustomUserId, setIsCustomUserId] = useState(false); 
+  const [showPeerIdInfo, setShowPeerIdInfo] = useState(false); 
 
   const {
     userProfile,
@@ -53,6 +56,7 @@ export default function NocapMeetHomePage() {
     incomingCall,
     localStream,
     remoteStream,
+    initializePeerWithName,
   } = usePeer();
 
   useEffect(() => {
@@ -75,14 +79,16 @@ export default function NocapMeetHomePage() {
     }
   }, [userProfile]);
 
-  const isAppReady = !storeLoading && peerStatus.type !== 'idle';
+  const isAppReady = !storeLoading && peerStatus.type !== 'idle' && peerStatus.type !== 'waiting_for_name';
   
   const hasError = storeError || peerStatus.error;
 
 
   const handleUserSetup = async () => {
     if (userName.trim()) {
+      console.log('🚀 Setting up user with name:', userName.trim());
       
+      // Handle custom User ID if provided
       if (isCustomUserId && userIdInput.trim()) {
         const customUserId = userIdInput.trim();
         setCurrentUserId(customUserId);
@@ -91,6 +97,10 @@ export default function NocapMeetHomePage() {
       }
       
       await initializeUser(userName.trim());
+      
+      setTimeout(() => {
+        initializePeerWithName(userName.trim());
+      }, 100);
     }
   };
 
@@ -193,7 +203,9 @@ export default function NocapMeetHomePage() {
               ) : (
                 <>
                   <WifiOff className="w-4 h-4 text-yellow-500" />
-                  <span className="text-yellow-600">Connecting... ({peerStatus.type})</span>
+                  <span className="text-yellow-600">
+                    {peerStatus.type === 'waiting_for_name' ? 'Ready to start...' : `Connecting... (${peerStatus.type})`}
+                  </span>
                 </>
               )}
             </div>
@@ -339,6 +351,14 @@ export default function NocapMeetHomePage() {
                           : 'Generating...'
                         }
                       </p>
+                      {userProfile?.name && myPeerId && (
+                        <div className="text-xs text-blue-600 mt-1 flex items-center gap-1">
+                          <Info className="w-3 h-3" />
+                          <span>
+                            Valid for 3 days (changes {formatNextChangeDate(getPeerIdInfo(userProfile.name).nextChangeDate)})
+                          </span>
+                        </div>
+                      )}
                     </div>
                     <Button
                       variant="ghost"
@@ -353,6 +373,73 @@ export default function NocapMeetHomePage() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Peer ID Information Card */}
+            {userProfile?.name && myPeerId && (
+              <Card className="mb-8">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold text-lg flex items-center gap-2">
+                      <Info className="w-5 h-5" />
+                      3-Day Peer ID System
+                    </h3>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowPeerIdInfo(!showPeerIdInfo)}
+                    >
+                      {showPeerIdInfo ? 'Hide Details' : 'Show Details'}
+                    </Button>
+                  </div>
+                  
+                  {showPeerIdInfo && (
+                    <div className="space-y-3 text-sm">
+                      {(() => {
+                        const peerInfo = getPeerIdInfo(userProfile.name);
+                        return (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <div className="bg-gray-50 p-3 rounded-lg">
+                                <p className="font-medium text-gray-700">Current Call ID:</p>
+                                <p className="font-mono text-lg">{myPeerId}</p>
+                              </div>
+                              <div className="bg-blue-50 p-3 rounded-lg">
+                                <p className="font-medium text-blue-700">Valid Until:</p>
+                                <p className="text-blue-600">
+                                  {peerInfo.nextChangeDate.toLocaleDateString()} at midnight
+                                </p>
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <div className="bg-green-50 p-3 rounded-lg">
+                                <p className="font-medium text-green-700">Days Remaining:</p>
+                                <p className="text-green-600">
+                                  {peerInfo.daysUntilChange} day{peerInfo.daysUntilChange !== 1 ? 's' : ''}
+                                </p>
+                              </div>
+                              <div className="bg-yellow-50 p-3 rounded-lg">
+                                <p className="font-medium text-yellow-700">Period #:</p>
+                                <p className="text-yellow-600">{peerInfo.threeDayPeriod}</p>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                      
+                      <div className="bg-indigo-50 p-4 rounded-lg mt-4">
+                        <p className="font-medium text-indigo-700 mb-2">How it works:</p>
+                        <ul className="text-indigo-600 space-y-1 text-xs">
+                          <li>• Your Call ID is generated from your name + a 3-day period number</li>
+                          <li>• Everyone with the same name gets the same number for 3 days</li>
+                          <li>• After 3 days, everyone gets a new number automatically</li>
+                          <li>• This makes IDs memorable but prevents permanent conflicts</li>
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             <div className="grid lg:grid-cols-2 gap-8">
               {/* Add Contact */}
@@ -391,6 +478,9 @@ export default function NocapMeetHomePage() {
                     <p>2. Share it with your friend</p>
                     <p>3. Get their Call ID</p>
                     <p>4. Add them here to start calling!</p>
+                    <p className="mt-2 text-xs text-blue-700">
+                      💡 Call IDs stay the same for 3 days, making it easy to remember and share!
+                    </p>
                   </div>
                   
                   <div className="text-sm text-green-600 p-3 bg-green-50 rounded-lg">

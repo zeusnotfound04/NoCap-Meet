@@ -11,6 +11,7 @@ import { PeerData } from "@/types/peer";
 interface PeerStatus {
   type: 
     | "idle"
+    | "waiting_for_name"
     | "connecting" 
     | "connected"
     | "error"
@@ -52,13 +53,12 @@ interface PeerContextType {
   
   // Utility
   reconnect: () => void;
+  initializePeerWithName: (userName: string) => void;
 }
 
 // ===== CONTEXT =====
 
 const PeerContext = React.createContext<PeerContextType | undefined>(undefined);
-
-// ===== PROVIDER COMPONENT =====
 
 export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -69,7 +69,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   const activeCallRef = useRef<MediaConnection | null>(null);
   
   // Local state
-  const [status, setStatus] = useState<PeerStatus>({ type: "idle" });
+  const [status, setStatus] = useState<PeerStatus>({ type: "waiting_for_name" });
   const [incomingCall, setIncomingCall] = useState<MediaConnection | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -94,8 +94,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     userPreferences,
   } = useMeetingStore();
 
-  // ===== MEDIA FUNCTIONS =====
-
   const getMediaPermissions = useCallback(async (
     constraints: MediaStreamConstraints = { 
       audio: {
@@ -108,29 +106,27 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   ): Promise<MediaStream | null> => {
     try {
       setStatus({ type: "permission" });
-      console.log('🎥 Nocap-Meet: Requesting media permissions...');
       
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       setLocalStream(stream);
       
-      // Set local video element safely
       try {
         const localVideo = document.getElementById('local-video') as HTMLVideoElement;
         if (localVideo) {
           localVideo.srcObject = stream;
           localVideo.muted = true;
           localVideo.play().catch(error => {
-            console.warn('⚠️ Nocap-Meet: Error playing local video:', error);
+            console.warn(' : Error playing local video:', error);
           });
         }
       } catch (error) {
-        console.warn('⚠️ Nocap-Meet: Error setting local video:', error);
+        console.warn(' Error setting local video:', error);
       }
       
-      console.log('✅ Nocap-Meet: Media permissions granted');
+      console.log(' Media permissions granted');
       return stream;
     } catch (error: any) {
-      console.error('❌ Nocap-Meet: Media permission denied:', error);
+      console.error('Media permission denied:', error);
       setStatus({ type: "error", error: "Camera/microphone access denied" });
       return null;
     }
@@ -173,7 +169,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     return newState;
   }, [localStream]);
 
-  // ===== CALL FUNCTIONS =====
 
   const makeCall = useCallback(async (
     targetPeerId: string, 
@@ -485,20 +480,72 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
     try {
       chatConn.current.send(chatData);
-      console.log('💬 Nocap-Meet: Chat message sent');
       return true;
     } catch (error) {
-      console.error('❌ Nocap-Meet: Failed to send chat message:', error);
+      console.error(' Nocap-Meet: Failed to send chat message:', error);
       return false;
     }
   }, [userProfile, myPeerId]);
 
 
-  const initializePeer = useCallback(() => {
+  const initializePeer = useCallback((customName?: string) => {
     console.log('Initializing peer connection...');
+    console.log('🎯 Custom name provided:', customName);
+    console.log('🎯 UserProfile name:', userProfile?.name);
     setStatus({ type: "connecting" });
 
-    const peer = new Peer(PEER_CONFIG);
+    // Generate custom peer ID based on user name and time-based number (changes every 3 days)
+    const generateCustomPeerId = (): string => {
+      const userName = customName || userProfile?.name;
+      console.log('🎯 Using userName for peer ID:', userName);
+      
+      if (!userName || userName.trim() === '') {
+        const threeDayNumber = getThreeDayBasedNumber();
+        return `user_${threeDayNumber}`;
+      }
+      
+      const cleanName = userName.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const finalName = cleanName || 'user';
+      
+      // Generate number that stays same for 3 days
+      const threeDayNumber = getThreeDayBasedNumber(finalName);
+      const peerId = `${finalName}_${threeDayNumber}`;
+      
+      return peerId;
+    };
+
+    const getThreeDayBasedNumber = (seed?: string): number => {
+      const now = new Date();
+      const startOfYear = new Date(now.getFullYear(), 0, 1);
+      const dayOfYear = Math.floor((now.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24));
+      
+      const threeDayPeriod = Math.floor(dayOfYear / 3);
+      
+      let hash = 0;
+      if (seed) {
+        for (let i = 0; i < seed.length; i++) {
+          const char = seed.charCodeAt(i);
+          hash = ((hash << 5) - hash) + char;
+          hash = hash & hash; 
+        }
+      }
+      
+      const combinedNumber = (threeDayPeriod * 1000 + Math.abs(hash) % 1000) % 9000 + 1000;
+      
+      console.log('🎯 Three-day calculation:', {
+        userName: seed,
+        dayOfYear,
+        threeDayPeriod,
+        hash: Math.abs(hash) % 1000,
+        finalNumber: combinedNumber
+      });
+      return combinedNumber;
+    };
+
+    const customPeerId = generateCustomPeerId();
+    console.log('🎯 Nocap-Meet: Generated custom peer ID:', customPeerId);
+
+    const peer = new Peer(customPeerId, PEER_CONFIG);
     peerRef.current = peer;
 
     peer.on('open', (peerId) => {
@@ -574,6 +621,46 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
     peer.on('error', (error: any) => {
       console.error('❌ Nocap-Meet: Peer error:', error);
+      
+      if (error.type === 'unavailable-id') {
+        const userName = userProfile?.name || 'user';
+        const cleanName = userName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'user';
+        
+        const now = new Date();
+        const startOfYear = new Date(now.getFullYear(), 0, 1);
+        const dayOfYear = Math.floor((now.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24));
+        const threeDayPeriod = Math.floor(dayOfYear / 3);
+        
+        let hash = 0;
+        for (let i = 0; i < cleanName.length; i++) {
+          const char = cleanName.charCodeAt(i);
+          hash = ((hash << 5) - hash) + char;
+          hash = hash & hash;
+        }
+        
+        const baseNumber = (threeDayPeriod * 1000 + Math.abs(hash) % 1000) % 9000 + 1000;
+        
+        const suffix = Math.floor(Math.random() * 99);
+        const newPeerId = `${cleanName}_${baseNumber}_${suffix}`;
+        
+        if (peerRef.current) {
+          peerRef.current.destroy();
+        }
+        
+        setTimeout(() => {
+          const newPeer = new Peer(newPeerId, PEER_CONFIG);
+          peerRef.current = newPeer;
+          newPeer.on('open', (retryPeerId) => {
+            setMyPeerId(retryPeerId);
+            setStorePeerId(retryPeerId);
+            setConnectionStatus('connected');
+            setStatus({ type: "connected" });
+          });
+        }, 1000);
+        
+        return;
+      }
+      
       setStatus({ type: "error", error: error.message || "Connection failed" });
       setConnectionStatus('error');
     });
@@ -592,9 +679,29 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     setTimeout(initializePeer, 1000);
   }, [initializePeer]);
 
+  const initializePeerWithName = useCallback((userName: string) => {
+    
+    if (peerRef.current) {
+      console.log('🔄 Destroying existing peer connection');
+      peerRef.current.destroy();
+      peerRef.current = null;
+    }
+    
+    setStatus({ type: "connecting" });
+    setTimeout(() => {
+      console.log('🔄 Calling initializePeer with name:', userName);
+      initializePeer(userName);
+    }, 500);
+  }, [initializePeer]);
+
   useEffect(() => {
-    console.log('🎯 Nocap-Meet: Context mounted, initializing peer...');
-    initializePeer();
+    console.log('🎯 Nocap-Meet: Context mounted');
+    
+    if (userProfile?.name) {
+      initializePeer(userProfile.name);
+    } else {
+      setStatus({ type: "waiting_for_name" });
+    }
     
     return () => {
       console.log('🧹 Nocap-Meet: Context unmounting, cleaning up...');
@@ -635,7 +742,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       
       setStatus({ type: "idle" });
     };
-  }, []); 
+  }, [userProfile?.name, initializePeer]); 
 
 
   const playNotificationSound = useCallback(() => {
@@ -655,25 +762,31 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
 
   const contextValue: PeerContextType = {
-
+    // Refs
     peer: peerRef,
     chatConn,
     
+    // State
     status,
     incomingCall,
     localStream,
     remoteStream,
     isConnected: status.type === "connected" || status.type === "in_call" || status.type === "calling_peer",
     myPeerId,
+    
     makeCall,
     acceptCall,
     rejectCall,
     endCall,
+    
     toggleAudio,
     toggleVideo,
     initializeMedia,
+    
     sendChatMessage,
+    
     reconnect,
+    initializePeerWithName,
   };
 
   return (

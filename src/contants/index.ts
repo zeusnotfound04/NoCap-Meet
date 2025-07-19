@@ -1,6 +1,9 @@
 
 export const PEER_CONFIG = {
-  secure: true,
+  host: "3.6.199.235", 
+  port: 8080, 
+  path: '/nocap-meet/peerjs',
+  secure: false, 
   debug: process.env.NODE_ENV === 'development' ? 2 : 0,
   config: {
     iceServers: [
