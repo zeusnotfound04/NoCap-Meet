@@ -6,7 +6,6 @@ import { PEER_CONFIG } from "@/contants";
 import { IncomingCall } from "@/types/calling";
 import { PeerData } from "@/types/peer";
 
-// ===== TYPES =====
 
 interface PeerStatus {
   type: 
@@ -25,11 +24,9 @@ interface PeerStatus {
 }
 
 interface PeerContextType {
-  // Refs
   peer: React.RefObject<Peer | null>;
   chatConn: React.MutableRefObject<DataConnection | null>;
   
-  // State
   status: PeerStatus;
   incomingCall: MediaConnection | null;
   localStream: MediaStream | null;
@@ -37,49 +34,40 @@ interface PeerContextType {
   isConnected: boolean;
   myPeerId: string | null;
   
-  // Call Functions
   makeCall: (targetPeerId: string, callType?: 'video' | 'audio') => Promise<boolean>;
   acceptCall: () => Promise<void>;
   rejectCall: () => void;
   endCall: () => void;
   
-  // Media Functions
   toggleAudio: () => boolean;
   toggleVideo: () => boolean;
   initializeMedia: (constraints?: MediaStreamConstraints) => Promise<MediaStream | null>;
   
-  // Chat Functions
   sendChatMessage: (message: string, targetPeerId?: string) => boolean;
   
-  // Utility
   reconnect: () => void;
   initializePeerWithName: (userName: string) => void;
 }
 
-// ===== CONTEXT =====
 
 const PeerContext = React.createContext<PeerContextType | undefined>(undefined);
 
 export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  // Refs
   const peerRef = useRef<Peer | null>(null);
   const chatConn = useRef<DataConnection | null>(null);
   const activeCallRef = useRef<MediaConnection | null>(null);
   
-  // Local state
   const [status, setStatus] = useState<PeerStatus>({ type: "waiting_for_name" });
   const [incomingCall, setIncomingCall] = useState<MediaConnection | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [myPeerId, setMyPeerId] = useState<string | null>(null);
   
-  // Call tracking for duration calculation
   const callStartTime = useRef<Date | null>(null);
   const currentCallPeerId = useRef<string | null>(null);
   
-  // Store integration
   const {
     userProfile,
     contacts,
@@ -175,22 +163,19 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     callType: 'video' | 'audio' = 'video'
   ): Promise<boolean> => {
     if (!peerRef.current) {
-      console.error('❌ Nocap-Meet: Cannot make call - peer not ready');
+      console.error('Cannot make call - peer not ready');
       setStatus({ type: "error", error: "Connection not ready" });
       return false;
     }
 
     if (activeCallRef.current || incomingCall) {
-      console.error('❌ Nocap-Meet: Already in a call');
       setStatus({ type: "error", error: "Already in a call" });
       return false;
     }
 
     try {
-      console.log(`📞 Nocap-Meet: Starting ${callType} call to ${targetPeerId}`);
       setStatus({ type: "calling_peer" });
 
-      // Get media stream
       const constraints = {
         audio: {
           noiseSuppression: true,
@@ -205,12 +190,10 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         return false;
       }
 
-      // Create data connection for chat
       const dataConn = peerRef.current.connect(targetPeerId, { label: "chat" });
       chatConn.current = dataConn;
       setupDataConnection(dataConn);
 
-      // Make the call
       const call = peerRef.current.call(targetPeerId, stream, {
         metadata: {
           callerName: userProfile?.name || 'Unknown',
@@ -223,10 +206,8 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       setIncomingCall(call); // Use same ref for consistency
       setupCallEventHandlers(call);
 
-      // Set current call peer ID for tracking
       currentCallPeerId.current = targetPeerId;
 
-      // Add to call history
       await addCallToHistory({
         peerId: targetPeerId,
         name: 'Calling...',
@@ -235,11 +216,10 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         timestamp: new Date(),
       });
 
-      console.log('✅ Nocap-Meet: Call initiated');
       return true;
       
     } catch (error: any) {
-      console.error('❌ Nocap-Meet: Failed to make call:', error);
+      console.error('Failed to make call:', error);
       setStatus({ type: "error", error: error.message || "Failed to make call" });
       return false;
     }
@@ -247,14 +227,11 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const acceptCall = useCallback(async (): Promise<void> => {
     if (!incomingCall) {
-      console.error('❌ Nocap-Meet: No incoming call to accept');
+      console.error('No incoming call to accept');
       return;
     }
 
     try {
-      console.log('✅ Nocap-Meet: Accepting call...');
-      
-      // Get media stream
       let stream = localStream;
       if (!stream) {
         const callType = incomingCall.metadata?.callType || 'video';
@@ -270,14 +247,11 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         if (!stream) return;
       }
 
-      // Answer the call
       incomingCall.answer(stream);
       activeCallRef.current = incomingCall;
 
-      // Set current call peer ID for tracking
       currentCallPeerId.current = incomingCall.peer;
 
-      // Establish chat connection if not already exists
       if (!chatConn.current && peerRef.current) {
         const dataConn = peerRef.current.connect(incomingCall.peer, { label: "chat" });
         chatConn.current = dataConn;
@@ -288,9 +262,8 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       storeAcceptCall();
       setStatus({ type: "in_call" });
       
-      console.log('✅ Nocap-Meet: Call accepted');
     } catch (error: any) {
-      console.error('❌ Nocap-Meet: Failed to accept call:', error);
+      console.error('Failed to accept call:', error);
       setStatus({ type: "error", error: error.message || "Failed to accept call" });
     }
   }, [incomingCall, localStream, getMediaPermissions, storeAcceptCall]);
@@ -298,12 +271,8 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   const rejectCall = useCallback(() => {
     if (!incomingCall) return;
 
-    console.log('❌ Nocap-Meet: Rejecting call');
-    
-    // Close the call
     incomingCall.close();
     
-    // Send rejection notice
     if (peerRef.current) {
       const rejectConn = peerRef.current.connect(incomingCall.peer, { label: "call_rejected" });
       rejectConn.on('open', () => {
@@ -311,42 +280,33 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       });
     }
     
-    // Update call history to show as missed/rejected
     updateCallHistory(incomingCall.peer, { type: 'missed' });
     
-    // Reset state
     setIncomingCall(null);
     activeCallRef.current = null;
     setStatus({ type: "connected" });
     
-    console.log('✅ Nocap-Meet: Call rejected');
   }, [incomingCall, updateCallHistory]);
 
   const endCall = useCallback(() => {
-    console.log('📞 Nocap-Meet: Ending call');
 
-    // Close active call
     if (activeCallRef.current) {
       activeCallRef.current.close();
       activeCallRef.current = null;
     }
 
-    // Close incoming call if exists
     if (incomingCall && incomingCall !== activeCallRef.current) {
       incomingCall.close();
     }
 
-    // Close chat connection
     if (chatConn.current) {
       chatConn.current.close();
       chatConn.current = null;
     }
 
-    // Stop media streams
     if (localStream) {
       localStream.getTracks().forEach(track => {
         track.stop();
-        console.log('🎤📹 Nocap-Meet: Stopped track:', track.kind);
       });
       setLocalStream(null);
     }
@@ -362,10 +322,9 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         remoteVideo.srcObject = null;
       }
     } catch (error) {
-      console.warn('⚠️ Nocap-Meet: Error clearing video elements:', error);
+      console.warn(' Error clearing video elements:', error);
     }
 
-    // Reset state
     setIncomingCall(null);
     setRemoteStream(null);
     setStatus({ type: "call_ended" });
@@ -440,31 +399,29 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       
       if (typeof data === 'object' && data !== null && 'type' in data) {
         const peerData = data as PeerData;
-        console.log('✅ Nocap-Meet: Valid peer data received:', peerData);
-        // TODO: Add chat message handling logic here
       } else {
-        console.warn('⚠️ Nocap-Meet: Received invalid chat data format:', data);
+        console.warn('Received invalid chat data format:', data);
       }
     });
 
     conn.on('close', () => {
-      console.log('📡 Nocap-Meet: Chat connection closed');
+      console.log(' Chat connection closed');
     });
 
     conn.on('error', (error: any) => {
-      console.error('❌ Nocap-Meet: Chat connection error:', error);
+      console.error(' Chat connection error:', error);
     });
   }, []);
 
 
   const sendChatMessage = useCallback((message: string, targetPeerId?: string): boolean => {
     if (!chatConn.current || !chatConn.current.open) {
-      console.warn('⚠️ Nocap-Meet: No active chat connection');
+      console.warn('No active chat connection');
       return false;
     }
 
     if (!userProfile) {
-      console.warn('⚠️ Nocap-Meet: No user profile for chat');
+      console.warn('No user profile for chat');
       return false;
     }
 
@@ -489,15 +446,10 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
 
   const initializePeer = useCallback((customName?: string) => {
-    console.log('Initializing peer connection...');
-    console.log('🎯 Custom name provided:', customName);
-    console.log('🎯 UserProfile name:', userProfile?.name);
     setStatus({ type: "connecting" });
 
-    // Generate custom peer ID based on user name and time-based number (changes every 3 days)
     const generateCustomPeerId = (): string => {
       const userName = customName || userProfile?.name;
-      console.log('🎯 Using userName for peer ID:', userName);
       
       if (!userName || userName.trim() === '') {
         const threeDayNumber = getThreeDayBasedNumber();
@@ -507,7 +459,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       const cleanName = userName.toLowerCase().replace(/[^a-z0-9]/g, '');
       const finalName = cleanName || 'user';
       
-      // Generate number that stays same for 3 days
       const threeDayNumber = getThreeDayBasedNumber(finalName);
       const peerId = `${finalName}_${threeDayNumber}`;
       
@@ -532,18 +483,10 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       
       const combinedNumber = (threeDayPeriod * 1000 + Math.abs(hash) % 1000) % 9000 + 1000;
       
-      console.log('🎯 Three-day calculation:', {
-        userName: seed,
-        dayOfYear,
-        threeDayPeriod,
-        hash: Math.abs(hash) % 1000,
-        finalNumber: combinedNumber
-      });
       return combinedNumber;
     };
 
     const customPeerId = generateCustomPeerId();
-    console.log('🎯 Nocap-Meet: Generated custom peer ID:', customPeerId);
 
     const peer = new Peer(customPeerId, PEER_CONFIG);
     peerRef.current = peer;
@@ -593,7 +536,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     });
 
     peer.on('connection', (conn) => {
-      console.log('📡 Nocap-Meet: Data connection from:', conn.peer);
       
       if (conn.label === "call_rejected") {
         conn.close();
@@ -614,14 +556,11 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     });
 
     peer.on('close', () => {
-      console.log('🔒 Nocap-Meet: Peer connection closed');
       setStatus({ type: "idle" });
       setConnectionStatus('disconnected');
     });
 
     peer.on('error', (error: any) => {
-      console.error('❌ Nocap-Meet: Peer error:', error);
-      
       if (error.type === 'unavailable-id') {
         const userName = userProfile?.name || 'user';
         const cleanName = userName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'user';
@@ -668,7 +607,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [setStorePeerId, setConnectionStatus, setStoreIncomingCall, userPreferences.soundEnabled]);
 
   const reconnect = useCallback(() => {
-    console.log('🔄 Nocap-Meet: Reconnecting...');
     
     if (peerRef.current) {
       peerRef.current.destroy();
@@ -682,20 +620,17 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   const initializePeerWithName = useCallback((userName: string) => {
     
     if (peerRef.current) {
-      console.log('🔄 Destroying existing peer connection');
       peerRef.current.destroy();
       peerRef.current = null;
     }
     
     setStatus({ type: "connecting" });
     setTimeout(() => {
-      console.log('🔄 Calling initializePeer with name:', userName);
       initializePeer(userName);
     }, 500);
   }, [initializePeer]);
 
   useEffect(() => {
-    console.log('🎯 Nocap-Meet: Context mounted');
     
     if (userProfile?.name) {
       initializePeer(userProfile.name);
@@ -704,7 +639,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     }
     
     return () => {
-      console.log('🧹 Nocap-Meet: Context unmounting, cleaning up...');
       
       if (activeCallRef.current) {
         activeCallRef.current.close();
@@ -762,11 +696,9 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
 
   const contextValue: PeerContextType = {
-    // Refs
     peer: peerRef,
     chatConn,
     
-    // State
     status,
     incomingCall,
     localStream,
