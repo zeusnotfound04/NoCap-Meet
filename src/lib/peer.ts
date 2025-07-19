@@ -159,23 +159,38 @@ export class PeerManager {
     stream?: MediaStream,
     metadata?: any
   ): Promise<MediaConnection> {
+    console.log(`📞 [PeerManager.makeCall] Starting call to ${targetPeerId}`);
+    console.log(`🔧 [PeerManager.makeCall] Metadata:`, metadata);
+    
     if (!this.peer) {
+      console.error(`❌ [PeerManager.makeCall] Peer not initialized`);
       throw new Error('Peer not initialized');
     }
 
     try {
       const callStream = stream || this.localStream;
       if (!callStream) {
+        console.error(`❌ [PeerManager.makeCall] No stream available for call`);
         throw new Error('No stream available for call');
       }
+      
+      console.log(`📡 [PeerManager.makeCall] Using stream:`, {
+        streamId: callStream.id,
+        videoTracks: callStream.getVideoTracks().length,
+        audioTracks: callStream.getAudioTracks().length,
+        active: callStream.active
+      });
 
+      console.log(`📞 [PeerManager.makeCall] Creating call to ${targetPeerId}...`);
       const call = this.peer.call(targetPeerId, callStream, { metadata });
+      
+      console.log(`🔧 [PeerManager.makeCall] Setting up media connection...`);
       this.setupMediaConnection(call);
       
-      console.log(`📞 Calling ${targetPeerId}`);
+      console.log(`✅ [PeerManager.makeCall] Call initiated successfully to ${targetPeerId}`);
       return call;
     } catch (error) {
-      console.error('❌ Failed to make call:', error);
+      console.error('❌ [PeerManager.makeCall] Failed to make call:', error);
       throw error;
     }
   }
@@ -201,37 +216,53 @@ export class PeerManager {
   }
 
   private setupMediaConnection(call: MediaConnection): void {
+    console.log(`🔧 [PeerManager.setupMediaConnection] Setting up media connection with ${call.peer}`);
     this.mediaConnections.set(call.peer, call);
 
     call.on('stream', (remoteStream: MediaStream) => {
-      console.log('📺 Received remote stream from:', call.peer);
+      console.log('📺 [PeerManager.setupMediaConnection] Received remote stream from:', call.peer);
+      console.log('🔧 [PeerManager.setupMediaConnection] Remote stream details:', {
+        streamId: remoteStream.id,
+        videoTracks: remoteStream.getVideoTracks().length,
+        audioTracks: remoteStream.getAudioTracks().length,
+        active: remoteStream.active
+      });
       this.callbacks.onStream?.(remoteStream, call.peer);
     });
 
     call.on('close', () => {
-      console.log('📞 Call closed with:', call.peer);
+      console.log('📞 [PeerManager.setupMediaConnection] Call closed with:', call.peer);
       this.mediaConnections.delete(call.peer);
       this.callbacks.onClose?.(call.peer);
     });
 
     call.on('error', (error: Error) => {
-      console.error('❌ Call error with:', call.peer, error);
+      console.error('❌ [PeerManager.setupMediaConnection] Call error with:', call.peer, error);
       this.mediaConnections.delete(call.peer);
       this.callbacks.onError?.(error);
     });
+    
+    console.log(`✅ [PeerManager.setupMediaConnection] Media connection setup complete for ${call.peer}`);
   }
 
   // ===== DATA CONNECTION FUNCTIONALITY =====
 
   public connectToPeer(targetPeerId: string, metadata?: any): DataConnection {
+    console.log(` [PeerManager.connectToPeer] Connecting to ${targetPeerId}`);
+    console.log(` [PeerManager.connectToPeer] Metadata:`, metadata);
+    
     if (!this.peer) {
+      console.error(`❌ [PeerManager.connectToPeer] Peer not initialized`);
       throw new Error('Peer not initialized');
     }
 
+    console.log(` [PeerManager.connectToPeer] Creating data connection...`);
     const conn = this.peer.connect(targetPeerId, { metadata });
+    
+    console.log(` [PeerManager.connectToPeer] Setting up data connection handlers...`);
     this.setupDataConnection(conn);
     
-    console.log(`📡 Connecting to ${targetPeerId}`);
+    console.log(` [PeerManager.connectToPeer] Connection initiated to ${targetPeerId}`);
     return conn;
   }
 
@@ -239,32 +270,31 @@ export class PeerManager {
     this.dataConnections.set(conn.peer, conn);
 
     conn.on('open', () => {
-      console.log('✅ Data connection opened with:', conn.peer);
+      console.log(' Data connection opened with:', conn.peer);
     });
 
     conn.on('data', (data: any) => {
-      console.log('📨 Received data from:', conn.peer, data);
+      console.log(' Received data from:', conn.peer, data);
       this.callbacks.onData?.(data, conn.peer);
     });
 
     conn.on('close', () => {
-      console.log('📡 Data connection closed with:', conn.peer);
+      console.log(' Data connection closed with:', conn.peer);
       this.dataConnections.delete(conn.peer);
     });
 
     conn.on('error', (error: Error) => {
-      console.error('❌ Data connection error with:', conn.peer, error);
+      console.error(' Data connection error with:', conn.peer, error);
       this.dataConnections.delete(conn.peer);
     });
   }
 
-  public sendData(peerId: string, data: PeerData): boolean {
+  public sendData(peerId: string, data: PeerData ): boolean {
     const conn = this.dataConnections.get(peerId);
     if (conn && conn.open) {
       conn.send(data);
       return true;
     }
-    console.warn('⚠️ No open data connection with:', peerId);
     return false;
   }
 
@@ -276,7 +306,6 @@ export class PeerManager {
     });
   }
 
-  // ===== MEDIA CONTROLS =====
 
   public toggleAudio(enabled?: boolean): boolean {
     if (!this.localStream) return false;
