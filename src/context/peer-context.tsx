@@ -48,7 +48,6 @@ interface PeerContextType {
   reconnect: () => void;
   initializePeerWithName: (userName: string) => void;
   
-  // Utility functions
   testRingtone: () => void;
   stopRingtone: () => void;
 }
@@ -108,18 +107,12 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         if (localVideo) {
           localVideo.srcObject = stream;
           localVideo.muted = true;
-          localVideo.play().catch(error => {
-            console.warn(' : Error playing local video:', error);
-          });
+          localVideo.play().catch(error => {});
         }
-      } catch (error) {
-        console.warn(' Error setting local video:', error);
-      }
+      } catch (error) {}
       
-      console.log(' Media permissions granted');
       return stream;
     } catch (error: any) {
-      console.error('Media permission denied:', error);
       setStatus({ type: "error", error: "Camera/microphone access denied" });
       return null;
     }
@@ -144,7 +137,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       track.enabled = newState;
     });
     
-    console.log(`🎤 Nocap-Meet: Audio ${newState ? 'unmuted' : 'muted'}`);
     return newState;
   }, [localStream]);
 
@@ -158,7 +150,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       track.enabled = newState;
     });
     
-    console.log(`📹 Nocap-Meet: Video ${newState ? 'enabled' : 'disabled'}`);
     return newState;
   }, [localStream]);
 
@@ -168,7 +159,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     callType: 'video' | 'audio' = 'video'
   ): Promise<boolean> => {
     if (!peerRef.current) {
-      console.error('Cannot make call - peer not ready');
       setStatus({ type: "error", error: "Connection not ready" });
       return false;
     }
@@ -224,7 +214,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       return true;
       
     } catch (error: any) {
-      console.error('Failed to make call:', error);
       setStatus({ type: "error", error: error.message || "Failed to make call" });
       return false;
     }
@@ -232,11 +221,9 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const acceptCall = useCallback(async (): Promise<void> => {
     if (!incomingCall) {
-      console.error('No incoming call to accept');
       return;
     }
 
-    // Stop the ringtone when accepting the call
     stopNotificationSound();
 
     try {
@@ -270,7 +257,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       setStatus({ type: "in_call" });
       
     } catch (error: any) {
-      console.error('Failed to accept call:', error);
       setStatus({ type: "error", error: error.message || "Failed to accept call" });
     }
   }, [incomingCall, localStream, getMediaPermissions, storeAcceptCall]);
@@ -278,7 +264,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   const rejectCall = useCallback(() => {
     if (!incomingCall) return;
 
-    // Stop the ringtone when rejecting the call
     stopNotificationSound();
 
     incomingCall.close();
@@ -299,7 +284,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [incomingCall, updateCallHistory]);
 
   const endCall = useCallback(() => {
-    // Stop any ringtone that might still be playing
     stopNotificationSound();
 
     if (activeCallRef.current) {
@@ -333,9 +317,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       if (remoteVideo && remoteVideo.srcObject) {
         remoteVideo.srcObject = null;
       }
-    } catch (error) {
-      console.warn(' Error clearing video elements:', error);
-    }
+    } catch (error) {}
 
     setIncomingCall(null);
     setRemoteStream(null);
@@ -359,7 +341,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const setupCallEventHandlers = useCallback((call: MediaConnection) => {
     call.on('stream', (stream: MediaStream) => {
-      console.log('📺 Nocap-Meet: Received remote stream');
       setRemoteStream(stream);
       setStatus({ type: "in_call", remoteStream: stream });
       
@@ -371,7 +352,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
           const contact = contacts.find(c => c.peerId === currentCallPeerId.current);
           if (contact) {
             updateCallHistory(currentCallPeerId.current, { name: contact.name });
-            console.log(' Updated call history with contact name:', contact.name);
           }
         }
       }
@@ -380,31 +360,23 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         const remoteVideo = document.getElementById('remote-video') as HTMLVideoElement;
         if (remoteVideo) {
           remoteVideo.srcObject = stream;
-          remoteVideo.play().catch(error => {
-            console.warn('  Error playing remote video:', error);
-          });
+          remoteVideo.play().catch(error => {});
         }
-      } catch (error) {
-        console.warn(' Error setting remote video:', error);
-      }
+      } catch (error) {}
     });
 
     call.on('close', () => {
-      console.log(' Call closed by remote');
       endCall();
     });
 
     call.on('error', (error: any) => {
-      console.error('Call error:', error);
       setStatus({ type: "error", error: error.message || "Call failed" });
       endCall();
     });
   }, [endCall, contacts, updateCallHistory, setCallConnected]);
 
   const setupDataConnection = useCallback((conn: DataConnection) => {
-    conn.on('open', () => {
-      console.log(' Chat connection opened with:', conn.peer);
-    });
+    conn.on('open', () => {});
 
     conn.on('data', (data: unknown) => {
       
@@ -424,21 +396,13 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
           
           const { addMessage } = useMeetingStore.getState();
           addMessage(chatMessage);
-          
-          console.log(' Chat message added to store:', chatMessage);
         }
-      } else {
-        console.warn(' Received invalid chat data format:', data);
       }
     });
 
-    conn.on('close', () => {
-      console.log(' Chat connection closed');
-    });
+    conn.on('close', () => {});
 
-    conn.on('error', (error: any) => {
-      console.error(' Chat connection error:', error);
-    });
+    conn.on('error', (error: any) => {});
   }, []);
 
 
@@ -480,10 +444,8 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       const { addMessage } = useMeetingStore.getState();
       addMessage(localMessage);
 
-      console.log(' Chat message sent:', message.trim());
       return true;
     } catch (error) {
-      console.error(' Failed to send chat message:', error);
       return false;
     }
   }, [userProfile, myPeerId]);
@@ -493,9 +455,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     if (peerRef.current) {
       try {
         peerRef.current.destroy();
-      } catch (error) {
-        console.warn(' Error destroying existing peer:', error);
-      }
+      } catch (error) {}
       peerRef.current = null;
     }
 
@@ -545,7 +505,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     peerRef.current = peer;
 
     peer.on('open', (peerId) => {
-      console.log(' Peer connected with ID:', peerId);
       setMyPeerId(peerId);
       setStorePeerId(peerId);
       setConnectionStatus('connected');
@@ -553,10 +512,8 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     });
 
     peer.on('call', (call) => {
-      console.log(' Incoming call from:', call.peer);
       
       if (activeCallRef.current || incomingCall) {
-        console.log(' Already in call, rejecting');
         call.close();
         return;
       }
@@ -603,7 +560,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     });
 
     peer.on('disconnected', () => {
-      console.log('🔌 Nocap-Meet: Peer disconnected');
       setStatus({ type: "idle" });
       setConnectionStatus('disconnected');
     });
@@ -614,10 +570,8 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     });
 
     peer.on('error', (error: any) => {
-      console.error('🔥 PeerJS Error:', error);
       
       if (error.type === 'unavailable-id') {
-        console.log('🔄 ID taken, generating new one with random suffix...');
         
         const userName = customName || userProfile?.name || 'user';
         const cleanName = userName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'user';
@@ -625,8 +579,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         const timestamp = Date.now().toString().slice(-4);
         const randomSuffix = Math.floor(Math.random() * 999) + 100;
         const newPeerId = `${cleanName}_${timestamp}_${randomSuffix}`;
-        
-        console.log('🆔 Retrying with new peer ID:', newPeerId);
         
         if (peerRef.current) {
           peerRef.current.destroy();
@@ -692,7 +644,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
           });
 
           newPeer.on('disconnected', () => {
-            console.log('🔌 Peer disconnected');
             setStatus({ type: "idle" });
             setConnectionStatus('disconnected');
           });
@@ -703,7 +654,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
           });
 
           newPeer.on('error', (retryError: any) => {
-            console.error('🔥 Retry peer error:', retryError);
             setStatus({ type: "error", error: retryError.message || "Connection failed" });
             setConnectionStatus('error');
           });
@@ -771,10 +721,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         localStream.getTracks().forEach(track => {
           try {
             track.stop();
-            console.log(' Cleanup - stopped track:', track.kind);
-          } catch (error) {
-            console.warn('  Error stopping track:', error);
-          }
+          } catch (error) {}
         });
       }
       
@@ -782,12 +729,9 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         try {
           peerRef.current.destroy();
           peerRef.current = null;
-        } catch (error) {
-          console.warn('  Error destroying peer:', error);
-        }
+        } catch (error) {}
       }
       
-      // Stop any playing ringtone
       if (ringtoneAudioRef.current) {
         ringtoneAudioRef.current.pause();
         ringtoneAudioRef.current.currentTime = 0;
@@ -801,56 +745,38 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const playNotificationSound = useCallback(() => {
     if (!userPreferences.soundEnabled) {
-      console.log('🔇 Ringtone disabled in user preferences');
       return;
     }
 
     try {
-      // Stop any existing ringtone first
       if (ringtoneAudioRef.current) {
         ringtoneAudioRef.current.pause();
         ringtoneAudioRef.current.currentTime = 0;
       }
 
-      // Create new audio instance for the ringtone
       const audio = new Audio('/ringtone.mp3');
       ringtoneAudioRef.current = audio;
       
-      // Configure the audio
       audio.loop = true;
-      audio.volume = 0.7; // Set volume to 70%
+      audio.volume = 0.7;
       
-      // Add event listeners for better feedback
-      audio.addEventListener('canplaythrough', () => {
-        console.log('🔊 Ringtone loaded and ready to play');
-      });
+      audio.addEventListener('canplaythrough', () => {});
       
-      audio.addEventListener('play', () => {
-        console.log('🔊 Incoming call ringtone started playing...');
-      });
+      audio.addEventListener('play', () => {});
       
-      audio.addEventListener('error', (e) => {
-        console.error('❌ Error loading ringtone:', e);
-      });
+      audio.addEventListener('error', (e) => {});
       
-      // Play the ringtone
-      audio.play().catch(error => {
-        console.warn('🔊 Could not play ringtone (may need user interaction first):', error);
-      });
+      audio.play().catch(error => {});
       
-      // Auto-stop after 30 seconds as a safety measure
       setTimeout(() => {
         if (ringtoneAudioRef.current === audio) {
           audio.pause();
           audio.currentTime = 0;
           ringtoneAudioRef.current = null;
-          console.log('🔇 Ringtone auto-stopped after 30 seconds');
         }
       }, 30000);
       
-    } catch (error) {
-      console.warn('❌ Error playing incoming call ringtone:', error);
-    }
+    } catch (error) {}
   }, [userPreferences.soundEnabled]);
 
   const stopNotificationSound = useCallback(() => {
@@ -859,11 +785,8 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         ringtoneAudioRef.current.pause();
         ringtoneAudioRef.current.currentTime = 0;
         ringtoneAudioRef.current = null;
-        console.log('🔇 Ringtone stopped');
       }
-    } catch (error) {
-      console.warn('❌ Error stopping ringtone:', error);
-    }
+    } catch (error) {}
   }, []);
 
 
