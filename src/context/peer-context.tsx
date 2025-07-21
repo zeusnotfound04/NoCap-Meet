@@ -69,6 +69,11 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [myPeerId, setMyPeerId] = useState<string | null>(null);
   
+  // Connection retry state
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
+  const [maxConnectionAttempts] = useState(2);
+  const [isRetrying, setIsRetrying] = useState(false);
+  
   const callStartTime = useRef<Date | null>(null);
   const currentCallPeerId = useRef<string | null>(null);
   
@@ -451,22 +456,99 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [userProfile, myPeerId]);
 
 
+  const createPeerWithRetry = useCallback((customPeerId: string, attempt: number = 0): Promise<Peer> => {
+    return new Promise((resolve, reject) => {
+      if (attempt > 0) {
+        setIsRetrying(true);
+        const retryMessage = `Retrying connection... (${attempt}/${maxConnectionAttempts})`;
+        setStatus({ type: "connecting", error: retryMessage });
+      }
+
+      const peer = new Peer(customPeerId, PEER_CONFIG);
+      
+      // Increase timeout for each attempt
+      const timeoutDuration = 8000 + (attempt * 4000); // 8s, 12s, 16s
+      const connectionTimeout = setTimeout(() => {
+        peer.destroy();
+        
+        if (attempt < maxConnectionAttempts) {
+          const timestamp = Date.now().toString().slice(-4);
+          const randomSuffix = Math.floor(Math.random() * 999) + 100;
+          const userName = customPeerId.split('_')[0] || 'user';
+          const newPeerId = `${userName}_${timestamp}_${randomSuffix}`;
+          
+          setTimeout(() => {
+            createPeerWithRetry(newPeerId, attempt + 1)
+              .then(resolve)
+              .catch(reject);
+          }, 2000);
+        } else {
+          const timeoutError = new Error('Connection timeout after all attempts');
+          reject(timeoutError);
+        }
+      }, timeoutDuration);
+
+      peer.on('open', (peerId) => {
+        clearTimeout(connectionTimeout);
+        setIsRetrying(false);
+        setConnectionAttempts(0);
+        resolve(peer);
+      });
+
+      peer.on('error', (error: any) => {
+        clearTimeout(connectionTimeout);
+
+        if (error.type === 'unavailable-id') {
+          const timestamp = Date.now().toString().slice(-4);
+          const randomSuffix = Math.floor(Math.random() * 999) + 100;
+          const userName = customPeerId.split('_')[0] || 'user';
+          const newPeerId = `${userName}_${timestamp}_${randomSuffix}`;
+          
+          createPeerWithRetry(newPeerId, attempt)
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
+
+        if (attempt < maxConnectionAttempts) {
+          setTimeout(() => {
+            const timestamp = Date.now().toString().slice(-4);
+            const randomSuffix = Math.floor(Math.random() * 999) + 100;
+            const userName = customPeerId.split('_')[0] || 'user';
+            const newPeerId = `${userName}_${timestamp}_${randomSuffix}`;
+            
+            createPeerWithRetry(newPeerId, attempt + 1)
+              .then(resolve)
+              .catch(reject);
+          }, 3000); // Wait 3 seconds before retry
+        } else {
+          reject(error);
+        }
+      });
+    });
+  }, [maxConnectionAttempts]);
+
   const initializePeer = useCallback((customName?: string) => {
     if (peerRef.current) {
       try {
         peerRef.current.destroy();
-      } catch (error) {}
+      } catch (error) {
+        console.error('Error destroying existing peer:', error);
+      }
       peerRef.current = null;
     }
 
     setStatus({ type: "connecting" });
+    setConnectionAttempts(0);
+    setIsRetrying(false);
 
     const generateCustomPeerId = (): string => {
       const userName = customName || userProfile?.name;
       
       if (!userName || userName.trim() === '') {
         const threeDayNumber = getThreeDayBasedNumber();
-        return `user_${threeDayNumber}`;
+        const peerId = `user_${threeDayNumber}`;
+        return peerId;
       }
       
       const cleanName = userName.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -501,173 +583,119 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
     const customPeerId = generateCustomPeerId();
 
-    const peer = new Peer(customPeerId, PEER_CONFIG);
-    peerRef.current = peer;
-
-    peer.on('open', (peerId) => {
-      setMyPeerId(peerId);
-      setStorePeerId(peerId);
-      setConnectionStatus('connected');
-      setStatus({ type: "connected" });
-    });
-
-    peer.on('call', (call) => {
-      
-      if (activeCallRef.current || incomingCall) {
-        call.close();
-        return;
+    // Test server connectivity first
+    const testServerConnectivity = async (): Promise<boolean> => {
+      try {
+        const serverUrl = `http://${PEER_CONFIG.host}:${PEER_CONFIG.port}`;
+        
+        const abortController = new AbortController();
+        const timeout = setTimeout(() => abortController.abort(), 5000);
+        
+        const response = await fetch(serverUrl, { 
+          method: 'HEAD', 
+          mode: 'no-cors',
+          signal: abortController.signal
+        });
+        
+        clearTimeout(timeout);
+        return true;
+      } catch (error) {
+        return false;
       }
+    };
 
-      setIncomingCall(call);
-      setupCallEventHandlers(call);
-      setStatus({ type: "incoming_call" });
+    testServerConnectivity();
 
-      if (userPreferences.soundEnabled) {
-        playNotificationSound();
-      }
+    // Use the retry mechanism
+    createPeerWithRetry(customPeerId)
+      .then((peer) => {
+        peerRef.current = peer;
+        const peerId = peer.id;
+        
+        setMyPeerId(peerId);
+        setStorePeerId(peerId);
+        setConnectionStatus('connected');
+        setStatus({ type: "connected" });
 
-      const incomingCallData: IncomingCall = {
-        callId: `call-${Date.now()}`,
-        callerPeerId: call.peer,
-        callerName: call.metadata?.callerName || 'Unknown',
-        callerAvatar: call.metadata?.callerAvatar,
-        timestamp: new Date(),
-        type: call.metadata?.callType || 'video',
-      };
-      setStoreIncomingCall(incomingCallData);
+        // Setup event handlers for the successfully connected peer
+        peer.on('call', (call) => {
+          if (activeCallRef.current || incomingCall) {
+            call.close();
+            return;
+          }
+
+          setIncomingCall(call);
+          setupCallEventHandlers(call);
+          setStatus({ type: "incoming_call" });
+
+          if (userPreferences.soundEnabled) {
+            playNotificationSound();
+          }
+
+          const incomingCallData: IncomingCall = {
+            callId: `call-${Date.now()}`,
+            callerPeerId: call.peer,
+            callerName: call.metadata?.callerName || 'Unknown',
+            callerAvatar: call.metadata?.callerAvatar,
+            timestamp: new Date(),
+            type: call.metadata?.callType || 'video',
+          };
+          setStoreIncomingCall(incomingCallData);
+          
+          addCallToHistory({
+            peerId: call.peer,
+            name: call.metadata?.callerName || 'Unknown Caller',
+            type: 'incoming',
+            callType: call.metadata?.callType || 'video',
+            timestamp: new Date(),
+          });
+        });
+
+        peer.on('connection', (conn) => {
+         
+          
+          if (conn.label === "call_rejected") {
+         
+            conn.close();
+            setStatus({ type: "error", error: "Call was declined" });
+            return;
+          }
+          
+          if (conn.label === "chat") {
+           
+            chatConn.current = conn;
+            setupDataConnection(conn);
+          }
+        });
+
+        peer.on('disconnected', () => {
+         
+          setStatus({ type: "idle" });
+          setConnectionStatus('disconnected');
+        });
+
+        peer.on('close', () => {
+        
+          setStatus({ type: "idle" });
+          setConnectionStatus('disconnected');
+        });
+
+        peer.on('error', (error: any) => {
+         
+          setStatus({ type: "error", error: error.message || "Connection failed" });
+          setConnectionStatus('error');
+        });
+
+       
+      })
+      .catch((error) => {
       
-      addCallToHistory({
-        peerId: call.peer,
-        name: call.metadata?.callerName || 'Unknown Caller',
-        type: 'incoming',
-        callType: call.metadata?.callType || 'video',
-        timestamp: new Date(),
+        setIsRetrying(false);
+        setStatus({ type: "error", error: error.message || "Connection failed after all attempts" });
+        setConnectionStatus('error');
       });
-    });
 
-    peer.on('connection', (conn) => {
-      
-      if (conn.label === "call_rejected") {
-        conn.close();
-        setStatus({ type: "error", error: "Call was declined" });
-        return;
-      }
-      
-      if (conn.label === "chat") {
-        chatConn.current = conn;
-        setupDataConnection(conn);
-      }
-    });
-
-    peer.on('disconnected', () => {
-      setStatus({ type: "idle" });
-      setConnectionStatus('disconnected');
-    });
-
-    peer.on('close', () => {
-      setStatus({ type: "idle" });
-      setConnectionStatus('disconnected');
-    });
-
-    peer.on('error', (error: any) => {
-      
-      if (error.type === 'unavailable-id') {
-        
-        const userName = customName || userProfile?.name || 'user';
-        const cleanName = userName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'user';
-        
-        const timestamp = Date.now().toString().slice(-4);
-        const randomSuffix = Math.floor(Math.random() * 999) + 100;
-        const newPeerId = `${cleanName}_${timestamp}_${randomSuffix}`;
-        
-        if (peerRef.current) {
-          peerRef.current.destroy();
-          peerRef.current = null;
-        }
-        
-        setTimeout(() => {
-          const newPeer = new Peer(newPeerId, PEER_CONFIG);
-          peerRef.current = newPeer;
-          
-          newPeer.on('open', (retryPeerId) => {
-            setMyPeerId(retryPeerId);
-            setStorePeerId(retryPeerId);
-            setConnectionStatus('connected');
-            setStatus({ type: "connected" });
-          });
-          
-          newPeer.on('call', (call) => {
-            
-            if (activeCallRef.current || incomingCall) {
-              call.close();
-              return;
-            }
-
-            setIncomingCall(call);
-            setupCallEventHandlers(call);
-            setStatus({ type: "incoming_call" });
-
-            if (userPreferences.soundEnabled) {
-              playNotificationSound();
-            }
-
-            const incomingCallData: IncomingCall = {
-              callId: `call-${Date.now()}`,
-              callerPeerId: call.peer,
-              callerName: call.metadata?.callerName || 'Unknown',
-              callerAvatar: call.metadata?.callerAvatar,
-              timestamp: new Date(),
-              type: call.metadata?.callType || 'video',
-            };
-            setStoreIncomingCall(incomingCallData);
-            
-            addCallToHistory({
-              peerId: call.peer,
-              name: call.metadata?.callerName || 'Unknown Caller',
-              type: 'incoming',
-              callType: call.metadata?.callType || 'video',
-              timestamp: new Date(),
-            });
-          });
-
-          newPeer.on('connection', (conn) => {
-            if (conn.label === "call_rejected") {
-              conn.close();
-              setStatus({ type: "error", error: "Call was declined" });
-              return;
-            }
-            
-            if (conn.label === "chat") {
-              chatConn.current = conn;
-              setupDataConnection(conn);
-            }
-          });
-
-          newPeer.on('disconnected', () => {
-            setStatus({ type: "idle" });
-            setConnectionStatus('disconnected');
-          });
-
-          newPeer.on('close', () => {
-            setStatus({ type: "idle" });
-            setConnectionStatus('disconnected');
-          });
-
-          newPeer.on('error', (retryError: any) => {
-            setStatus({ type: "error", error: retryError.message || "Connection failed" });
-            setConnectionStatus('error');
-          });
-          
-        }, 1000);
-        
-        return;
-      }
-      
-      setStatus({ type: "error", error: error.message || "Connection failed" });
-      setConnectionStatus('error');
-    });
-
-  }, [setStorePeerId, setConnectionStatus, setStoreIncomingCall, userPreferences.soundEnabled]);
+  }, [setStorePeerId, setConnectionStatus, setStoreIncomingCall, userPreferences.soundEnabled, setupCallEventHandlers, addCallToHistory, createPeerWithRetry]);
 
   const reconnect = useCallback(() => {
     
@@ -692,6 +720,8 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       initializePeer(userName);
     }, 500);
   }, [initializePeer]);
+
+ 
 
   useEffect(() => {
     

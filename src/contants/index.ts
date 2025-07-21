@@ -1,7 +1,8 @@
 
+// PeerJS configuration
 export const PEER_CONFIG = {
-  host: process.env.NEXT_PUBLIC_PEERJS_HOST!, 
-  port: parseInt(process.env.NEXT_PUBLIC_PEERJS_PORT!), 
+  host: process.env.NEXT_PUBLIC_PEERJS_HOST || 'localhost', 
+  port: parseInt(process.env.NEXT_PUBLIC_PEERJS_PORT || '9000'), 
   path: '/nocap-meet/peerjs',
   secure: false, 
   debug: process.env.NODE_ENV === 'development' ? 2 : 0,
@@ -10,6 +11,9 @@ export const PEER_CONFIG = {
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun.services.mozilla.com' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
     ]
   }
 };

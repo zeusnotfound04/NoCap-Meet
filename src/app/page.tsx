@@ -49,11 +49,14 @@ export default function NocapMeetHomePage() {
   } = usePeer();
 
   useEffect(() => {
+    console.log('🏪 [PAGE_DEBUG] Store initialization effect triggered');
     const initialize = async () => {
       try {
+        console.log('🚀 [PAGE_DEBUG] Starting store initialization...');
         await initializeStore();
+        console.log('✅ [PAGE_DEBUG] Store initialization completed');
       } catch (error) {
-        console.error('Homepage: Failed to initialize store:', error);
+        console.error('❌ [PAGE_DEBUG] Failed to initialize store:', error);
       }
     };
 
@@ -62,41 +65,53 @@ export default function NocapMeetHomePage() {
 
   useEffect(() => {
     if (currentUserId) {
-      console.log('Homepage: Store initialized with user ID:', currentUserId);
+      console.log('🆔 [PAGE_DEBUG] Store initialized with user ID:', currentUserId);
     }
   }, [currentUserId]);
 
   useEffect(() => {
     if (userProfile?.name) {
+      console.log('👤 [PAGE_DEBUG] User profile loaded:', userProfile.name);
       setUserName(userProfile.name);
     }
   }, [userProfile]);
 
   const isStoreReady = !storeLoading && !!currentUserId;
   const isPeerReady = peerStatus.type !== 'idle';
-  const isAppReady = isStoreReady && isPeerReady;
+  // App is ready when store is ready, regardless of peer status (user might need to set up profile first)
+  const isAppReady = isStoreReady;
   const hasError = storeError || peerStatus.error;
 
   useEffect(() => {
-    console.log('Homepage: Store state -', {
+    console.log('📊 [PAGE_DEBUG] App state update:', {
       storeLoading,
       currentUserId,
       peerStatus: peerStatus.type,
+      peerError: peerStatus.error,
       userProfile: !!userProfile,
       isStoreReady,
       isPeerReady,
-      isAppReady
+      isAppReady,
+      isConnected,
+      hasError,
+      timestamp: new Date().toISOString()
     });
-  }, [storeLoading, currentUserId, peerStatus.type, userProfile, isStoreReady, isPeerReady, isAppReady]);
+  }, [storeLoading, currentUserId, peerStatus.type, userProfile, isStoreReady, isPeerReady, isAppReady, isConnected, hasError]);
 
   const handleUserSetup = async () => {
     if (userName.trim()) {
-      console.log('Setting up user with name:', userName.trim());
-      await initializeUser(userName.trim());
-      
-      setTimeout(() => {
-        initializePeerWithName(userName.trim());
-      }, 100);
+      console.log('👤 [PAGE_DEBUG] Setting up user with name:', userName.trim());
+      try {
+        await initializeUser(userName.trim());
+        console.log('✅ [PAGE_DEBUG] User initialization completed');
+        
+        setTimeout(() => {
+          console.log('🔗 [PAGE_DEBUG] Initializing peer connection...');
+          initializePeerWithName(userName.trim());
+        }, 100);
+      } catch (error) {
+        console.error('❌ [PAGE_DEBUG] User setup failed:', error);
+      }
     }
   };
 
@@ -233,6 +248,11 @@ export default function NocapMeetHomePage() {
                     <Wifi className="w-4 h-4 text-green-500" />
                     <span className="text-green-600 font-medium">Ready to connect</span>
                   </>
+                ) : peerStatus.error && peerStatus.error.includes('Retrying') ? (
+                  <>
+                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-orange-500"></div>
+                    <span className="text-orange-600 font-medium text-xs">{peerStatus.error}</span>
+                  </>
                 ) : (
                   <>
                     <WifiOff className="w-4 h-4 text-yellow-500" />
@@ -275,20 +295,18 @@ export default function NocapMeetHomePage() {
                 <BlurText delay={400} className="w-full flex justify-center">
                   <Button 
                     onClick={handleUserSetup} 
-                    disabled={!userName.trim() || !isConnected}
+                    disabled={!userName.trim()}
                     className="w-full py-3 text-base sm:text-lg font-semibold"
                   >
-                    {isConnected ? 'Create Profile' : 'Connecting...'}
+                    Create Profile
                   </Button>
                 </BlurText>
                 
-                {!isConnected && (
-                  <BlurText 
-                    text="Waiting for connection..." 
-                    className="text-xs text-gray-500 text-center" 
-                    delay={450}
-                  />
-                )}
+                <BlurText 
+                  text="Enter your name to get started" 
+                  className="text-xs text-gray-500 text-center" 
+                  delay={450}
+                />
               </CardContent>
             </Card>
           ) : (
