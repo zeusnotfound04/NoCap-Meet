@@ -12,18 +12,21 @@ import { CallStatus } from '@/components/CallStatus';
 import { ChatWindow } from '@/components/ChatWindow';
 import { ChatToggleButton } from '@/components/ChatToggleButton';
 import BlurText from '@/components/ui/blur-effect';
-import DotGrid from '@/components/ui/dot-grid-background';
+import Squares from '@/components/ui/squre-background';
 import { poppins, rocknRollOne, roboto } from '@/lib/fonts';
 import { 
   Phone, 
   User,
   Wifi,
-  WifiOff
+  WifiOff,
+  Copy,
+  Check
 } from 'lucide-react';
 
 export default function NocapMeetHomePage() {
   const [userName, setUserName] = useState('');
   const [targetPeerId, setTargetPeerId] = useState('');
+  const [copied, setCopied] = useState(false);
 
   const {
     userProfile,
@@ -106,28 +109,50 @@ export default function NocapMeetHomePage() {
     }
   };
 
+  const handleCopyCallId = async () => {
+    if (myPeerId) {
+      try {
+        await navigator.clipboard.writeText(myPeerId);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (error) {
+        console.error('Failed to copy Call ID:', error);
+        // Fallback for older browsers
+        const textArea = document.createElement('textarea');
+        textArea.value = myPeerId;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    }
+  };
+
   if (!isAppReady) {
     return (
       <div className={`min-h-screen relative ${poppins.className}`}>
-        <DotGrid 
-          dotSize={12}
-          gap={24}
-          baseColor="#e5e7eb"
-          activeColor="#3b82f6"
-          proximity={120}
-          className="absolute inset-0"
-        />
-        <div className="relative z-10 min-h-screen flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+        <div className="absolute inset-0">
+          <Squares 
+            direction="right"
+            speed={0.5}
+            borderColor="rgba(156, 163, 175, 0.3)"
+            squareSize={60}
+            hoverFillColor="rgba(59, 130, 246, 0.1)"
+          />
+        </div>
+        <div className="relative z-10 min-h-screen flex items-center justify-center px-4 sm:px-6 lg:px-8">
+          <div className="text-center max-w-sm sm:max-w-md w-full">
+            <div className="animate-spin rounded-full h-10 w-10 sm:h-12 sm:w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
             <BlurText 
               text="Setting up Nocap-Meet..." 
-              className="text-gray-700 text-lg font-medium" 
+              className="text-gray-700 text-base sm:text-lg font-medium" 
               delay={100}
             />
             <BlurText 
-              text="Direct baat cheet ladle" 
-              className={`text-sm text-gray-600 mt-2 ${rocknRollOne.className}`}
+              text="Because some calls deserve real privacy" 
+              className={`text-sm text-gray-600 mt-2 px-4 ${rocknRollOne.className}`}
               delay={150}
             />
           </div>
@@ -139,31 +164,32 @@ export default function NocapMeetHomePage() {
   if (hasError) {
     return (
       <div className={`min-h-screen relative ${poppins.className}`}>
-        <DotGrid 
-          dotSize={12}
-          gap={24}
-          baseColor="#fecaca"
-          activeColor="#dc2626"
-          proximity={120}
-          className="absolute inset-0"
-        />
-        <div className="relative z-10 min-h-screen flex items-center justify-center">
-          <Card className="max-w-md w-full mx-4 bg-white/90 backdrop-blur-sm border border-white/20">
-            <CardHeader>
+        <div className="absolute inset-0">
+          <Squares 
+            direction="up"
+            speed={0.3}
+            borderColor="rgba(239, 68, 68, 0.3)"
+            squareSize={50}
+            hoverFillColor="rgba(220, 38, 38, 0.1)"
+          />
+        </div>
+        <div className="relative z-10 min-h-screen flex items-center justify-center px-4 sm:px-6 lg:px-8">
+          <Card className="max-w-sm sm:max-w-md w-full bg-white/90 backdrop-blur-sm border border-white/20">
+            <CardHeader className="px-4 sm:px-6 py-4 sm:py-6">
               <BlurText 
                 text="Connection Error" 
-                className="text-xl font-bold text-red-600" 
+                className="text-lg sm:text-xl font-bold text-red-600" 
                 delay={100}
               />
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-4 sm:px-6 pb-6">
               <BlurText 
                 text={storeError || peerStatus.error || "An error occurred"} 
-                className="text-gray-700 mb-4" 
+                className="text-gray-700 mb-4 text-sm sm:text-base" 
                 delay={150}
               />
               <BlurText delay={200}>
-                <Button onClick={() => window.location.reload()} className="w-full">
+                <Button onClick={() => window.location.reload()} className="w-full py-3 text-base">
                   Reload Nocap-Meet
                 </Button>
               </BlurText>
@@ -176,29 +202,27 @@ export default function NocapMeetHomePage() {
 
   return (
     <div className={`min-h-screen relative ${poppins.className}`}>
-      <DotGrid 
-        dotSize={10}
-        gap={28}
-        baseColor="#e2e8f0"
-        activeColor="#3b82f6"
-        proximity={140}
-        speedTrigger={80}
-        shockRadius={200}
-        shockStrength={4}
-        className="absolute inset-0"
-      />
-      <div className="relative z-10 min-h-screen flex items-center justify-center">
-        <div className="container mx-auto px-4 py-8 max-w-md">
+      <div className="absolute inset-0">
+        <Squares 
+          direction="diagonal"
+          speed={0.8}
+          borderColor="rgba(148, 163, 184, 0.2)"
+          squareSize={80}
+          hoverFillColor="rgba(59, 130, 246, 0.08)"
+        />
+      </div>
+      <div className="relative z-10 min-h-screen flex items-center justify-center px-4 sm:px-6 lg:px-8">
+        <div className="container mx-auto py-4 sm:py-8 w-full max-w-sm sm:max-w-md">
           
-          <div className="text-center mb-12">
+          <div className="text-center mb-8 sm:mb-12">
             <BlurText 
               text="Nocap-Meet" 
-              className={`text-4xl md:text-5xl font-bold text-gray-800 mb-4 ${rocknRollOne.className}`}
+              className={`text-3xl sm:text-4xl md:text-5xl font-bold text-gray-800 mb-3 sm:mb-4 ${rocknRollOne.className}`}
               delay={100}
             />
             <BlurText 
-              text="Direct baat cheet ladle" 
-              className={`text-lg text-gray-600 mb-4 ${roboto.className}`}
+              text="Because some calls deserve real privacy" 
+              className={`text-base sm:text-lg text-gray-600 mb-3 sm:mb-4 px-2 ${roboto.className}`}
               delay={150}
             />
             
@@ -222,19 +246,19 @@ export default function NocapMeetHomePage() {
           <CallStatus />
 
           {!userProfile ? (
-            <Card className="w-full bg-white/90 backdrop-blur-sm border border-white/20 shadow-xl">
-              <CardHeader className="text-center">
+            <Card className="w-full bg-white/90 backdrop-blur-sm border border-white/20 shadow-xl mx-2 sm:mx-0">
+              <CardHeader className="text-center px-4 sm:px-6 py-4 sm:py-6">
                 <BlurText delay={250}>
-                  <h2 className="text-xl font-bold flex items-center justify-center">
+                  <h2 className="text-lg sm:text-xl font-bold flex items-center justify-center">
                     <User className="w-5 h-5 mr-2" />
                     Setup Your Profile
                   </h2>
                 </BlurText>
               </CardHeader>
-              <CardContent className="space-y-6 flex flex-col items-center">
+              <CardContent className="space-y-4 sm:space-y-6 flex flex-col items-center px-4 sm:px-6 pb-6">
                 <BlurText 
                   text="What should we call you?" 
-                  className="text-gray-600 text-center font-medium" 
+                  className="text-gray-600 text-center font-medium text-sm sm:text-base" 
                   delay={300}
                 />
                 
@@ -244,7 +268,7 @@ export default function NocapMeetHomePage() {
                     value={userName}
                     onChange={(e) => setUserName(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleUserSetup()}
-                    className="text-center text-lg max-w-sm w-full bg-white/80"
+                    className="text-center text-base sm:text-lg w-full bg-white/80"
                   />
                 </BlurText>
                 
@@ -252,7 +276,7 @@ export default function NocapMeetHomePage() {
                   <Button 
                     onClick={handleUserSetup} 
                     disabled={!userName.trim() || !isConnected}
-                    className="max-w-sm w-full py-3 text-lg font-semibold"
+                    className="w-full py-3 text-base sm:text-lg font-semibold"
                   >
                     {isConnected ? 'Create Profile' : 'Connecting...'}
                   </Button>
@@ -268,22 +292,22 @@ export default function NocapMeetHomePage() {
               </CardContent>
             </Card>
           ) : (
-            <Card className="w-full bg-white/90 backdrop-blur-sm border border-white/20 shadow-xl">
-              <CardHeader className="text-center">
+            <Card className="w-full bg-white/90 backdrop-blur-sm border border-white/20 shadow-xl mx-2 sm:mx-0">
+              <CardHeader className="text-center px-4 sm:px-6 py-4 sm:py-6">
                 <BlurText delay={100}>
                   <div className="text-center">
-                    <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold text-2xl mx-auto mb-3">
+                    <div className="w-14 h-14 sm:w-16 sm:h-16 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold text-xl sm:text-2xl mx-auto mb-3">
                       {userProfile.name.charAt(0).toUpperCase()}
                     </div>
-                    <h2 className={`text-xl font-semibold ${roboto.className}`}>{userProfile.name}</h2>
+                    <h2 className={`text-lg sm:text-xl font-semibold ${roboto.className}`}>{userProfile.name}</h2>
                     <p className="text-sm text-gray-500">Ready to make calls</p>
                   </div>
                 </BlurText>
               </CardHeader>
-              <CardContent className="space-y-6 flex flex-col items-center">
+              <CardContent className="space-y-4 sm:space-y-6 flex flex-col items-center px-4 sm:px-6 pb-6">
                 <BlurText 
                   text="Enter friend's Call ID to connect" 
-                  className="text-gray-600 text-center font-medium" 
+                  className="text-gray-600 text-center font-medium text-sm sm:text-base" 
                   delay={150}
                 />
                 
@@ -293,7 +317,7 @@ export default function NocapMeetHomePage() {
                     value={targetPeerId}
                     onChange={(e) => setTargetPeerId(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleMakeCall()}
-                    className="text-center text-lg font-mono max-w-sm w-full bg-white/80"
+                    className="text-center text-sm sm:text-lg font-mono w-full bg-white/80"
                   />
                 </BlurText>
                 
@@ -301,21 +325,34 @@ export default function NocapMeetHomePage() {
                   <Button 
                     onClick={handleMakeCall}
                     disabled={!targetPeerId.trim() || !isConnected || peerStatus.type === 'calling_peer' || peerStatus.type === 'in_call'}
-                    className="max-w-sm w-full py-3 text-lg font-semibold"
+                    className="w-full py-3 text-base sm:text-lg font-semibold"
                   >
-                    <Phone className="w-5 h-5 mr-2" />
+                    <Phone className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
                     Make Call
                   </Button>
                 </BlurText>
                 
                 {myPeerId && (
                   <BlurText delay={300} className="w-full flex justify-center">
-                    <div className="text-center p-4 bg-blue-50/80 backdrop-blur-sm rounded-lg max-w-sm w-full border border-blue-200/50">
+                    <div className="text-center p-3 sm:p-4 bg-blue-50/80 backdrop-blur-sm rounded-lg w-full border border-blue-200/50">
                       <p className="text-sm text-blue-700 mb-2 font-medium">Your Call ID:</p>
-                      <p className={`font-mono text-lg text-blue-800 break-all ${roboto.className}`}>
-                        {myPeerId}
-                      </p>
-                      <p className="text-xs text-blue-600 mt-2">
+                      <div className="flex items-start justify-center gap-2 mb-3">
+                        <p className={`font-mono text-sm sm:text-lg text-blue-800 break-all flex-1 ${roboto.className}`}>
+                          {myPeerId}
+                        </p>
+                        <button
+                          onClick={handleCopyCallId}
+                          className={`p-1 rounded hover:bg-blue-100 transition-colors flex-shrink-0 ${copied ? 'text-green-600' : 'text-blue-600'}`}
+                          title={copied ? 'Copied!' : 'Copy Call ID'}
+                        >
+                          {copied ? (
+                            <Check className="w-4 h-4" />
+                          ) : (
+                            <Copy className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
+                      <p className="text-xs text-blue-600">
                         Share this with friends so they can call you
                       </p>
                     </div>
