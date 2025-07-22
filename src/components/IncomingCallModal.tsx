@@ -2,7 +2,7 @@
 
 import { usePeer } from '@/context/peer-context';
 import { Button } from '@/components/ui/button';
-import { Phone, PhoneOff, Video, User } from 'lucide-react';
+import { Phone, PhoneOff, User } from 'lucide-react';
 
 export function IncomingCallModal() {
   const { status, incomingCall, acceptCall, rejectCall } = usePeer();
@@ -12,7 +12,6 @@ export function IncomingCallModal() {
   }
 
   const callerName = incomingCall.metadata?.callerName || 'Unknown';
-  const callType = incomingCall.metadata?.callType || 'video';
   const callerAvatar = incomingCall.metadata?.callerAvatar;
 
   return (
@@ -24,31 +23,22 @@ export function IncomingCallModal() {
             <img 
               src={callerAvatar} 
               alt={callerName}
-              className="w-24 h-24 rounded-full mx-auto object-cover"
+              className="w-32 h-32 rounded-full mx-auto object-cover shadow-lg"
             />
           ) : (
-            <div className="w-24 h-24 rounded-full mx-auto bg-blue-500 flex items-center justify-center text-white text-3xl font-bold">
-              {callerName.charAt(0).toUpperCase()}
+            <div className="w-32 h-32 rounded-full mx-auto bg-blue-500 flex items-center justify-center text-white shadow-lg">
+              <User className="w-16 h-16" />
             </div>
           )}
         </div>
         
         <div className="mb-8">
-          <h3 className="text-xl font-semibold text-gray-800 mb-2">
+          <h3 className="text-2xl font-semibold text-gray-800 mb-2">
             {callerName}
           </h3>
           <p className="text-gray-500 flex items-center justify-center gap-2">
-            {callType === 'video' ? (
-              <>
-                <Video className="w-4 h-4" />
-                Incoming video call
-              </>
-            ) : (
-              <>
-                <Phone className="w-4 h-4" />
-                Incoming audio call
-              </>
-            )}
+            <Phone className="w-4 h-4" />
+            Incoming audio call
           </p>
           <p className="text-sm text-gray-400 mt-1">
             From: {incomingCall.peer.slice(0, 8)}...
@@ -72,7 +62,7 @@ export function IncomingCallModal() {
         </div>
         
         <p className="text-xs text-gray-400 mt-4">
-          Accept to start the call
+          Accept to start the audio call
         </p>
       </div>
     </div>

@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(hexdump:*)",
-      "Bash(npm run dev:*)"
+      "Bash(npm run dev:*)",
+      "Bash(timeout 10s npm run dev)"
     ],
     "deny": []
   }

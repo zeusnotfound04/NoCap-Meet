@@ -51,7 +51,6 @@ interface PeerContextType {
   testRingtone: () => void;
   stopRingtone: () => void;
   checkMediaPermissions: () => Promise<{
-    camera: PermissionState;
     microphone: PermissionState;
   }>;
 }
@@ -99,11 +98,11 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   const getMediaPermissions = useCallback(async (
     constraints: MediaStreamConstraints = { 
       audio: {
-        noiseSuppression: true,
         echoCancellation: true,
+        noiseSuppression: true,
         autoGainControl: true,
       },
-      video: true 
+      video: false 
     }
   ): Promise<MediaStream | null> => {
     try {
@@ -111,45 +110,38 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       
       // Check if getUserMedia is available
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setStatus({ type: "error", error: "Camera/microphone not supported in this browser" });
+        setStatus({ type: "error", error: "Microphone not supported in this browser" });
         return null;
       }
 
       // Try to get permissions
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       
-      setLocalStream(stream);
+      // Ensure audio tracks are enabled by default
+      const audioTracks = stream.getAudioTracks();
+      audioTracks.forEach(track => {
+        track.enabled = true;
+      });
       
-      try {
-        const localVideo = document.getElementById('local-video') as HTMLVideoElement;
-        if (localVideo) {
-          localVideo.srcObject = stream;
-          localVideo.muted = true;
-          localVideo.play().catch(error => {
-            // Silently handle video play errors
-          });
-        }
-      } catch (error) {
-        // Silently handle video setup errors
-      }
+      setLocalStream(stream);
       
       return stream;
       
     } catch (error: any) {
       
       // Provide more specific error messages
-      let errorMessage = "Camera/microphone access denied";
+      let errorMessage = "Microphone access denied";
       
       if (error.name === 'NotAllowedError') {
-        errorMessage = "Please allow camera and microphone access and try again";
+        errorMessage = "Please allow microphone access and try again";
       } else if (error.name === 'NotFoundError') {
-        errorMessage = "No camera or microphone found";
+        errorMessage = "No microphone found";
       } else if (error.name === 'NotReadableError') {
-        errorMessage = "Camera/microphone is already in use by another application";
+        errorMessage = "Microphone is already in use by another application";
       } else if (error.name === 'OverconstrainedError') {
-        errorMessage = "Camera/microphone constraints cannot be satisfied";
+        errorMessage = "Microphone constraints cannot be satisfied";
       } else if (error.name === 'SecurityError') {
-        errorMessage = "Camera/microphone access blocked due to security policy";
+        errorMessage = "Microphone access blocked due to security policy";
       }
       
       setStatus({ type: "error", error: errorMessage });
@@ -168,26 +160,28 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     const fallbackConstraints: MediaStreamConstraints[] = [
       constraints || {
         audio: {
-          noiseSuppression: true,
           echoCancellation: true,
+          noiseSuppression: true,
           autoGainControl: true,
         },
-        video: true
+        video: false
       },
-      // Fallback 1: Simpler audio constraints
+      // Fallback 1: Basic audio with echo cancellation
       {
-        audio: true,
-        video: true
+        audio: {
+          echoCancellation: true,
+        },
+        video: false
       },
-      // Fallback 2: Audio only
+      // Fallback 2: Basic audio only
       {
         audio: true,
         video: false
       },
-      // Fallback 3: Basic constraints
+      // Fallback 3: Minimal constraints
       {
         audio: {},
-        video: {}
+        video: false
       }
     ];
     
@@ -236,7 +230,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const makeCall = useCallback(async (
     targetPeerId: string, 
-    callType: 'video' | 'audio' = 'video'
+    callType: 'video' | 'audio' = 'audio'
   ): Promise<boolean> => {
     if (!peerRef.current) {
       setStatus({ type: "error", error: "Connection not ready" });
@@ -254,14 +248,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       // Check permissions first
       const permissions = await checkMediaPermissions();
       
-      if (permissions.camera === 'denied' && callType === 'video') {
-        setStatus({ 
-          type: "error", 
-          error: "Camera permission denied. Please allow camera access in your browser settings and refresh the page." 
-        });
-        return false;
-      }
-      
       if (permissions.microphone === 'denied') {
         setStatus({ 
           type: "error", 
@@ -272,18 +258,18 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const constraints = {
         audio: {
-          noiseSuppression: true,
           echoCancellation: true,
+          noiseSuppression: true,
           autoGainControl: true,
         },
-        video: callType === 'video'
+        video: false
       };
       
       const stream = await initializeMedia(constraints);
       if (!stream) {
         setStatus({ 
           type: "error", 
-          error: "Failed to access camera/microphone. Please check your device and browser permissions." 
+          error: "Failed to access microphone. Please check your device and browser permissions." 
         });
         return false;
       }
@@ -303,6 +289,18 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       activeCallRef.current = call;
       setIncomingCall(call);
       setupCallEventHandlers(call);
+      
+      // Enable audio context for better browser compatibility
+      try {
+        if (typeof AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined') {
+          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+          if (audioContext.state === 'suspended') {
+            audioContext.resume();
+          }
+        }
+      } catch (error) {
+        // Audio context not supported or failed
+      }
 
       currentCallPeerId.current = targetPeerId;
 
@@ -332,14 +330,13 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       let stream = localStream;
       if (!stream) {
-        const callType = incomingCall.metadata?.callType || 'video';
         const constraints = {
           audio: {
-            noiseSuppression: true,
             echoCancellation: true,
+            noiseSuppression: true,
             autoGainControl: true,
           },
-          video: callType === 'video'
+          video: false
         };
         stream = await getMediaPermissions(constraints);
         if (!stream) return;
@@ -347,6 +344,18 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
       incomingCall.answer(stream);
       activeCallRef.current = incomingCall;
+      
+      // Enable audio context for better browser compatibility
+      try {
+        if (typeof AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined') {
+          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+          if (audioContext.state === 'suspended') {
+            audioContext.resume();
+          }
+        }
+      } catch (error) {
+        // Audio context not supported or failed
+      }
 
       currentCallPeerId.current = incomingCall.peer;
 
@@ -410,17 +419,16 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       setLocalStream(null);
     }
 
+    // Clean up audio elements
     try {
-      const localVideo = document.getElementById('local-video') as HTMLVideoElement;
-      const remoteVideo = document.getElementById('remote-video') as HTMLVideoElement;
-      
-      if (localVideo && localVideo.srcObject) {
-        localVideo.srcObject = null;
+      const remoteAudio = document.getElementById('remote-audio') as HTMLAudioElement;
+      if (remoteAudio) {
+        remoteAudio.srcObject = null;
+        remoteAudio.remove();
       }
-      if (remoteVideo && remoteVideo.srcObject) {
-        remoteVideo.srcObject = null;
-      }
-    } catch (error) {}
+    } catch (error) {
+      // Silent cleanup
+    }
 
     setIncomingCall(null);
     setRemoteStream(null);
@@ -459,13 +467,35 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       }
       
+      // Set up remote audio stream for playback
       try {
-        const remoteVideo = document.getElementById('remote-video') as HTMLVideoElement;
-        if (remoteVideo) {
-          remoteVideo.srcObject = stream;
-          remoteVideo.play().catch(error => {});
+        const audioTracks = stream.getAudioTracks();
+        
+        // Create or get existing audio element for remote stream
+        let remoteAudio = document.getElementById('remote-audio') as HTMLAudioElement;
+        if (!remoteAudio) {
+          remoteAudio = document.createElement('audio');
+          remoteAudio.id = 'remote-audio';
+          remoteAudio.autoplay = true;
+          remoteAudio.playsInline = true;
+          remoteAudio.controls = false;
+          remoteAudio.volume = 1.0;
+          document.body.appendChild(remoteAudio);
         }
-      } catch (error) {}
+        
+        remoteAudio.srcObject = stream;
+        
+        // Ensure the audio plays
+        const playPromise = remoteAudio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(error => {
+            // Auto-play was prevented, try user interaction
+            console.warn('Auto-play prevented, audio will play after user interaction');
+          });
+        }
+      } catch (error) {
+        console.error('Failed to set up remote audio:', error);
+      }
     });
 
     call.on('close', () => {
@@ -944,31 +974,20 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   const checkMediaPermissions = useCallback(async (): Promise<{
-    camera: PermissionState;
     microphone: PermissionState;
   }> => {
     try {
       if (!navigator.permissions) {
-        return { camera: 'prompt', microphone: 'prompt' };
+        return { microphone: 'prompt' };
       }
 
-      const [cameraPermission, microphonePermission] = await Promise.all([
-        navigator.permissions.query({ name: 'camera' as PermissionName }),
-        navigator.permissions.query({ name: 'microphone' as PermissionName })
-      ]);
-
-      console.log('🔍 [PERMISSION_DEBUG] Current permissions:', {
-        camera: cameraPermission.state,
-        microphone: microphonePermission.state
-      });
+      const microphonePermission = await navigator.permissions.query({ name: 'microphone' as PermissionName });
 
       return {
-        camera: cameraPermission.state,
         microphone: microphonePermission.state
       };
     } catch (error) {
-      console.warn('⚠️ [PERMISSION_DEBUG] Permission check failed:', error);
-      return { camera: 'prompt', microphone: 'prompt' };
+      return { microphone: 'prompt' };
     }
   }, []);
 
