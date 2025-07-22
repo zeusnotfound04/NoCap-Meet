@@ -10,12 +10,8 @@ interface RedisConfig {
   lazyConnect?: boolean;
 }
 
-
-
 let isRedisConfigured = false;
 let redisClient: Redis | null = null;
-
-// In-memory fallback storage when Redis is not available
 const memoryStorage = new Map<string, string>();
 
 const configureRedis = (): boolean => {
@@ -24,38 +20,34 @@ const configureRedis = (): boolean => {
   }
 
   try {
-    // Check if REDIS_URL exists
     if (!process.env.REDIS_URL) {
-      console.warn('⚠️ REDIS_URL not found, using memory storage fallback');
       return false;
     }
 
     redisClient = new Redis(process.env.REDIS_URL!);
 
     redisClient.on('connect', () => {
-      console.log('✅ Redis connected successfully');
       isRedisConfigured = true;
     });
 
-    redisClient.on('error', (error: any) => {
-      console.warn('⚠️ Redis connection error, falling back to memory storage:', error.message);
+    redisClient.on('ready', () => {
+      isRedisConfigured = true;
+    });
+
+    redisClient.on('error', () => {
       isRedisConfigured = false;
     });
 
     redisClient.on('close', () => {
-      console.log('🔌 Redis connection closed, using memory storage');
       isRedisConfigured = false;
     });
 
     redisClient.on('reconnecting', () => {
-      console.log('🔄 Redis reconnecting...');
       isRedisConfigured = false;
     });
 
-    console.log('🔧 Redis client configured successfully');
     return true;
   } catch (error) {
-    console.warn("⚠️ Redis configuration error, using memory storage:", error);
     return false;
   }
 };
@@ -69,47 +61,61 @@ export const STORAGE_KEYS = {
     DEVICE_SETTINGS: "nocap-meet-device-settings"
 } as const;
 
-// Helper function to create namespaced keys
 const createKey = (userId: string, key: string): string => {
   return `nocap-meet:${userId}:${key}`;
 };
 
-// Memory storage fallback functions
-const setMemory = (key: string, value: string): void => {
-  memoryStorage.set(key, value);
-};
-
-const getMemory = (key: string): string | null => {
+const getFromStorage = async (key: string): Promise<string | null> => {
+  try {
+    if (redisClient && isRedisConfigured && redisClient.status === 'ready') {
+      return await redisClient.get(key);
+    }
+  } catch (error) {
+    // Silent fallback
+  }
   return memoryStorage.get(key) || null;
 };
 
-const delMemory = (key: string): void => {
-  memoryStorage.delete(key);
+const setToStorage = async (key: string, value: string, expireSeconds?: number): Promise<void> => {
+  try {
+    if (redisClient && isRedisConfigured && redisClient.status === 'ready') {
+      if (expireSeconds) {
+        await redisClient.set(key, value, 'EX', expireSeconds);
+      } else {
+        await redisClient.set(key, value);
+      }
+      return;
+    }
+  } catch (error) {
+    // Silent fallback
+  }
+  memoryStorage.set(key, value);
 };
 
-const keysMemory = (pattern: string): string[] => {
-  const keys = Array.from(memoryStorage.keys());
-  const regex = new RegExp(pattern.replace('*', '.*'));
-  return keys.filter(key => regex.test(key));
+const deleteFromStorage = async (key: string): Promise<void> => {
+  try {
+    if (redisClient && isRedisConfigured && redisClient.status === 'ready') {
+      await redisClient.del(key);
+      return;
+    }
+  } catch (error) {
+    // Silent fallback
+  }
+  memoryStorage.delete(key);
 };
 
 export class RedisStorageManager {
     
   static async initializeStorage(config?: RedisConfig): Promise<void> {
-    console.log('🔧 RedisStorageManager: Starting Redis initialization...');
-
     if (!configureRedis()) {
       throw new Error('Failed to configure Redis client');
     }
 
     try {
-      console.log('⏳ Connecting to Redis...');
-
       if (!redisClient) {
         throw new Error('Redis client not initialized');
       }
 
-      // Connect to Redis with timeout
       await Promise.race([
         redisClient.connect(),
         new Promise<void>((_, reject) => {
@@ -117,13 +123,10 @@ export class RedisStorageManager {
         })
       ]);
 
-      console.log('✅ Redis connection established');
-
-      // Test basic Redis operations
       const testKey = 'nocap-meet:test:_test_key';
       const testValue = JSON.stringify({ test: 'test_value' });
 
-      await redisClient.set(testKey, testValue, 'EX', 60); // Expire in 60 seconds
+      await redisClient.set(testKey, testValue, 'EX', 60);
       const retrievedValue = await redisClient.get(testKey);
       await redisClient.del(testKey);
 
@@ -131,21 +134,16 @@ export class RedisStorageManager {
         throw new Error('Redis test failed: Values do not match');
       }
 
-      console.log(' Redis test passed and functional');
-
     } catch (error) {
-      console.error(' Redis initialization failed:', error);
       throw new Error(`Redis initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
-  // Alternative initialization method that's more forgiving
   static async initializeStorageGraceful(config?: RedisConfig): Promise<boolean> {
     try {
       configureRedis();
 
       if (!redisClient) {
-        console.error(' Redis client not available');
         return false;
       }
 
@@ -158,11 +156,8 @@ export class RedisStorageManager {
       const result = await redisClient.get(testKey);
       await redisClient.del(testKey);
       
-      const success = result === testValue;
-      console.log(success ? ' Redis initialized gracefully' : ' Redis test failed');
-      return success;
+      return result === testValue;
     } catch (error) {
-      console.error(' Graceful Redis init failed:', error);
       return false;
     }
   }
@@ -204,92 +199,53 @@ export class RedisStorageManager {
       };
     }
   }
+
   private static async ensureRedisReady(): Promise<boolean> {
     try {
-      if (!redisClient) {
-        configureRedis();
-        if (!redisClient) return false;
+      if (!isRedisConfigured || !redisClient) {
+        const success = await this.initializeStorageGraceful();
+        if (!success) {
+          return false;
+        }
       }
-
-      // Check if already connected
-      if (isRedisConfigured && redisClient.status === 'ready') {
-        return true;
-      }
-
-      // Quick ping with timeout to check if connection is alive
-      const pingPromise = redisClient.ping();
+      
+      const pingPromise = redisClient!.ping();
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error('Ping timeout')), 2000);
       });
 
       await Promise.race([pingPromise, timeoutPromise]);
-      isRedisConfigured = true;
       return true;
     } catch (error) {
-      console.warn('⚠️ Redis not ready, using memory storage:', error);
-      isRedisConfigured = false;
       return false;
     }
   }
 
   static async setUserProfile(profile: UserProfile, userId: string): Promise<void> {
     try {
+      await this.ensureRedisReady();
+      
       const key = createKey(userId, STORAGE_KEYS.USER_PROFILE);
-      const value = JSON.stringify(profile);
-      
-      // Try Redis first
-      if (await this.ensureRedisReady() && redisClient) {
-        await redisClient.set(key, value);
-        console.log('✅ User profile saved to Redis');
-        return;
-      }
-      
-      // Fallback to memory storage
-      setMemory(key, value);
-      console.log('💾 User profile saved to memory storage (Redis unavailable)');
+      await setToStorage(key, JSON.stringify(profile));
     } catch (err) {
-      // Final fallback to memory storage
-      const key = createKey(userId, STORAGE_KEYS.USER_PROFILE);
-      const value = JSON.stringify(profile);
-      setMemory(key, value);
-      console.log('💾 User profile saved to memory storage (fallback)', err);
+      throw err;
     }
   }
 
   static async getUserProfile(userId: string): Promise<UserProfile | null> {
     try {
-      console.log('🔍 RedisStorageManager: Getting user profile...');
+      await this.ensureRedisReady();
+      
       const key = createKey(userId, STORAGE_KEYS.USER_PROFILE);
+      const profileData = await getFromStorage(key);
       
-      // Try Redis first
-      if (await this.ensureRedisReady() && redisClient) {
-        const profileData = await redisClient.get(key);
-        if (profileData) {
-          console.log('✅ User profile retrieved from Redis');
-          return JSON.parse(profileData) as UserProfile;
-        }
+      if (!profileData) {
+        return null;
       }
       
-      // Fallback to memory storage
-      const memoryData = getMemory(key);
-      if (memoryData) {
-        console.log('💾 User profile retrieved from memory storage');
-        return JSON.parse(memoryData) as UserProfile;
-      }
-      
-      console.log('❌ No user profile found');
-      return null;
+      const profile = JSON.parse(profileData) as UserProfile;
+      return profile;
     } catch (err) {
-      console.error("❌ Error while getting user profile", err);
-      
-      // Try memory storage as final fallback
-      const key = createKey(userId, STORAGE_KEYS.USER_PROFILE);
-      const memoryData = getMemory(key);
-      if (memoryData) {
-        console.log('💾 User profile retrieved from memory storage (fallback)');
-        return JSON.parse(memoryData) as UserProfile;
-      }
-      
       return null;
     }
   }
@@ -303,7 +259,7 @@ export class RedisStorageManager {
         await this.setUserProfile(profile, userId);
       }
     } catch (err) {
-      console.error("Failed to update user status", err);
+      // Silent fail
     }
   }
 
@@ -315,27 +271,24 @@ export class RedisStorageManager {
         await this.setUserProfile(profile, userId);
       }
     } catch (err) {
-      console.error("Failed to update the peerId", err);
+      // Silent fail
     }
   }
 
   static async getContacts(userId: string): Promise<Contact[]> {
     try {
       await this.ensureRedisReady();
-      if (!redisClient) throw new Error('Redis client not available');
       
       const key = createKey(userId, STORAGE_KEYS.CONTACTS);
-      const contactsData = await redisClient.get(key);
+      const contactsData = await getFromStorage(key);
       
       if (!contactsData) {
-        console.log(' RedisStorageManager: No contacts found');
         return [];
       }
       
       const contacts = JSON.parse(contactsData) as Contact[];
       return contacts || [];
     } catch (error) {
-      console.error('❌ Failed to get contacts:', error);
       return [];
     }
   }
@@ -348,17 +301,13 @@ export class RedisStorageManager {
       
       if (existingIndex >= 0) {
         contacts[existingIndex] = { ...contacts[existingIndex], ...contact };
-        console.log(`Contact updated: ${contact.name}`);
       } else {
         contacts.unshift(contact);
-        console.log(`Contact added: ${contact.name}`);
       }
       
-      if (!redisClient) throw new Error('Redis client not available');
       const key = createKey(userId, STORAGE_KEYS.CONTACTS);
-      await redisClient.set(key, JSON.stringify(contacts));
+      await setToStorage(key, JSON.stringify(contacts));
     } catch (error) {
-      console.error('Failed to add contact:', error);
       throw error;
     }
   }
@@ -368,12 +317,9 @@ export class RedisStorageManager {
       const contacts = await this.getContacts(userId);
       const filtered = contacts.filter(c => c.peerId !== peerId);
       
-      if (!redisClient) throw new Error('Redis client not available');
       const key = createKey(userId, STORAGE_KEYS.CONTACTS);
-      await redisClient.set(key, JSON.stringify(filtered));
-      console.log(`Contact removed: ${peerId}`);
+      await setToStorage(key, JSON.stringify(filtered));
     } catch (error) {
-      console.error('Failed to remove contact:', error);
       throw error;
     }
   }
@@ -387,12 +333,10 @@ export class RedisStorageManager {
           : contact
       );
       
-      if (!redisClient) throw new Error('Redis client not available');
       const key = createKey(userId, STORAGE_KEYS.CONTACTS);
-      await redisClient.set(key, JSON.stringify(updated));
-      console.log(`Last call updated for: ${peerId}`);
+      await setToStorage(key, JSON.stringify(updated));
     } catch (error) {
-      console.error('Failed to update last call:', error);
+      // Silent fail
     }
   }
 
@@ -405,28 +349,24 @@ export class RedisStorageManager {
           : contact
       );
       
-      if (!redisClient) throw new Error('Redis client not available');
       const key = createKey(userId, STORAGE_KEYS.CONTACTS);
-      await redisClient.set(key, JSON.stringify(updated));
-      console.log(`Favorite toggled for: ${peerId}`);
+      await setToStorage(key, JSON.stringify(updated));
     } catch (error) {
-      console.error('Failed to toggle favorite:', error);
+      // Silent fail
     }
   }
 
   static async getCallHistory(userId: string): Promise<any[]> {
     try {
       await this.ensureRedisReady();
-      if (!redisClient) throw new Error('Redis client not available');
       
       const key = createKey(userId, STORAGE_KEYS.CALL_HISTORY);
-      const historyData = await redisClient.get(key);
+      const historyData = await getFromStorage(key);
       
       if (!historyData) return [];
       
       return JSON.parse(historyData) as any[];
     } catch (error) {
-      console.error('Failed to get call history:', error);
       return [];
     }
   }
@@ -448,12 +388,10 @@ export class RedisStorageManager {
       
       const updated = [newCall, ...history].slice(0, 100);
       
-      if (!redisClient) throw new Error('Redis client not available');
       const key = createKey(userId, STORAGE_KEYS.CALL_HISTORY);
-      await redisClient.set(key, JSON.stringify(updated));
-      console.log(`Call added to history: ${call.type} ${call.callType} call`);
+      await setToStorage(key, JSON.stringify(updated));
     } catch (error) {
-      console.error('Failed to add call to history:', error);
+      // Silent fail
     }
   }
 
@@ -476,31 +414,29 @@ export class RedisStorageManager {
       });
 
       if (updated) {
-        if (!redisClient) throw new Error('Redis client not available');
         const key = createKey(userId, STORAGE_KEYS.CALL_HISTORY);
-        await redisClient.set(key, JSON.stringify(updatedHistory));
-        console.log(`Call history updated for ${peerId}:`, updates);
+        await setToStorage(key, JSON.stringify(updatedHistory));
       }
     } catch (error) {
-      console.error('Failed to update call history:', error);
+      // Silent fail
     }
   }
 
   static async clearCallHistory(userId: string): Promise<void> {
     try {
-      if (!redisClient) throw new Error('Redis client not available');
       const key = createKey(userId, STORAGE_KEYS.CALL_HISTORY);
-      await redisClient.del(key);
-      console.log('Call history cleared');
+      await deleteFromStorage(key);
     } catch (error) {
-      console.error('Failed to clear call history:', error);
+      // Silent fail
     }
   }
 
   static async getUserPreferences(userId: string): Promise<any> {
     try {
-      console.log('🔍 RedisStorageManager: Getting user preferences...');
+      await this.ensureRedisReady();
+      
       const key = createKey(userId, STORAGE_KEYS.USER_PREFERENCES);
+      const preferencesData = await getFromStorage(key);
       
       const defaultPreferences = {
         theme: 'light',
@@ -510,28 +446,13 @@ export class RedisStorageManager {
         soundEnabled: true,
       };
       
-      // Try Redis first
-      if (await this.ensureRedisReady() && redisClient) {
-        const preferencesData = await redisClient.get(key);
-        if (preferencesData) {
-          console.log('✅ User preferences retrieved from Redis');
-          const preferences = JSON.parse(preferencesData);
-          return { ...defaultPreferences, ...preferences };
-        }
+      if (!preferencesData) {
+        return defaultPreferences;
       }
       
-      // Fallback to memory storage
-      const memoryData = getMemory(key);
-      if (memoryData) {
-        console.log('💾 User preferences retrieved from memory storage');
-        const preferences = JSON.parse(memoryData);
-        return { ...defaultPreferences, ...preferences };
-      }
-      
-      console.log('💾 Using default preferences');
-      return defaultPreferences;
+      const preferences = JSON.parse(preferencesData);
+      return { ...defaultPreferences, ...preferences };
     } catch (error) {
-      console.error('❌ Failed to get user preferences:', error);
       return {
         theme: 'light',
         notifications: true,
@@ -553,12 +474,10 @@ export class RedisStorageManager {
       const existing = await this.getUserPreferences(userId);
       const updated = { ...existing, ...preferences };
       
-      if (!redisClient) throw new Error('Redis client not available');
       const key = createKey(userId, STORAGE_KEYS.USER_PREFERENCES);
-      await redisClient.set(key, JSON.stringify(updated));
-      console.log('User preferences saved');
+      await setToStorage(key, JSON.stringify(updated));
     } catch (error) {
-      console.error('Failed to save user preferences:', error);
+      // Silent fail
     }
   }
 
@@ -570,16 +489,14 @@ export class RedisStorageManager {
   }>> {
     try {
       await this.ensureRedisReady();
-      if (!redisClient) throw new Error('Redis client not available');
       
       const key = createKey(userId, STORAGE_KEYS.RECENT_ROOMS);
-      const roomsData = await redisClient.get(key);
+      const roomsData = await getFromStorage(key);
       
       if (!roomsData) return [];
       
       return JSON.parse(roomsData) as any[];
     } catch (error) {
-      console.error('Failed to get recent rooms:', error);
       return [];
     }
   }
@@ -594,25 +511,21 @@ export class RedisStorageManager {
         participants: 0
       };
       const filtered = recent.filter(r => r.roomId !== roomId);
-      const updated = [newEntry, ...filtered].slice(0, 10); // Keep last 10 rooms
+      const updated = [newEntry, ...filtered].slice(0, 10);
       
-      if (!redisClient) throw new Error('Redis client not available');
       const key = createKey(userId, STORAGE_KEYS.RECENT_ROOMS);
-      await redisClient.set(key, JSON.stringify(updated));
-      console.log(`Room added to recent: ${roomId}`);
+      await setToStorage(key, JSON.stringify(updated));
     } catch (error) {
-      console.error('Failed to add recent room:', error);
+      // Silent fail
     }
   }
 
   static async clearRecentRooms(userId: string): Promise<void> {
     try {
-      if (!redisClient) throw new Error('Redis client not available');
       const key = createKey(userId, STORAGE_KEYS.RECENT_ROOMS);
-      await redisClient.del(key);
-      console.log('Recent rooms cleared');
+      await deleteFromStorage(key);
     } catch (error) {
-      console.error('Failed to clear recent rooms:', error);
+      // Silent fail
     }
   }
 
@@ -627,22 +540,19 @@ export class RedisStorageManager {
       const existing = await this.getDeviceSettings(userId);
       const updated = { ...existing, ...settings };
       
-      if (!redisClient) throw new Error('Redis client not available');
       const key = createKey(userId, STORAGE_KEYS.DEVICE_SETTINGS);
-      await redisClient.set(key, JSON.stringify(updated));
-      console.log('Device settings saved');
+      await setToStorage(key, JSON.stringify(updated));
     } catch (error) {
-      console.error('Failed to save device settings:', error);
+      // Silent fail
     }
   }
 
   static async getDeviceSettings(userId: string): Promise<any> {
     try {
       await this.ensureRedisReady();
-      if (!redisClient) throw new Error('Redis client not available');
       
       const key = createKey(userId, STORAGE_KEYS.DEVICE_SETTINGS);
-      const settingsData = await redisClient.get(key);
+      const settingsData = await getFromStorage(key);
       
       const defaultSettings = {
         preferredCamera: null,
@@ -657,7 +567,6 @@ export class RedisStorageManager {
       const settings = JSON.parse(settingsData);
       return { ...defaultSettings, ...settings };
     } catch (error) {
-      console.error('Failed to get device settings:', error);
       return {
         preferredCamera: null,
         preferredMicrophone: null,
@@ -693,7 +602,6 @@ export class RedisStorageManager {
 
       return { keys: keys.map((k: any) => k.replace(`nocap-meet:${userId}:`, '')), usage, totalSize };
     } catch (error) {
-      console.error(' Failed to get storage info:', error);
       return { keys: [], usage: {}, totalSize: 0 };
     }
   }
@@ -716,7 +624,6 @@ export class RedisStorageManager {
       
       return data;
     } catch (error) {
-      console.error(' Failed to export data:', error);
       return {};
     }
   }
@@ -729,9 +636,7 @@ export class RedisStorageManager {
         const redisKey = createKey(userId, key);
         await redisClient.set(redisKey, JSON.stringify(value));
       }
-      console.log('Data imported successfully');
     } catch (error) {
-      console.error('Failed to import data:', error);
       throw error;
     }
   }
@@ -746,10 +651,7 @@ export class RedisStorageManager {
       if (keys.length > 0) {
         await redisClient.del(...keys);
       }
-      
-      console.log('All user data cleared');
     } catch (error) {
-      console.error('Failed to clear all data:', error);
       throw error;
     }
   }
@@ -758,10 +660,9 @@ export class RedisStorageManager {
     try {
       if (redisClient) {
         await redisClient.quit();
-        console.log(' Redis connection closed gracefully');
       }
     } catch (error) {
-      console.error(' Error while disconnecting from Redis:', error);
+      // Silent fail
     }
   }
 

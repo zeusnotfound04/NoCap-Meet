@@ -50,6 +50,10 @@ interface PeerContextType {
   
   testRingtone: () => void;
   stopRingtone: () => void;
+  checkMediaPermissions: () => Promise<{
+    camera: PermissionState;
+    microphone: PermissionState;
+  }>;
 }
 
 
@@ -62,6 +66,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   const chatConn = useRef<DataConnection | null>(null);
   const activeCallRef = useRef<MediaConnection | null>(null);
   const ringtoneAudioRef = useRef<HTMLAudioElement | null>(null);
+  const initializingRef = useRef<boolean>(false);
   
   const [status, setStatus] = useState<PeerStatus>({ type: "waiting_for_name" });
   const [incomingCall, setIncomingCall] = useState<MediaConnection | null>(null);
@@ -104,7 +109,15 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       setStatus({ type: "permission" });
       
+      // Check if getUserMedia is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setStatus({ type: "error", error: "Camera/microphone not supported in this browser" });
+        return null;
+      }
+
+      // Try to get permissions
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      
       setLocalStream(stream);
       
       try {
@@ -112,13 +125,34 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         if (localVideo) {
           localVideo.srcObject = stream;
           localVideo.muted = true;
-          localVideo.play().catch(error => {});
+          localVideo.play().catch(error => {
+            // Silently handle video play errors
+          });
         }
-      } catch (error) {}
+      } catch (error) {
+        // Silently handle video setup errors
+      }
       
       return stream;
+      
     } catch (error: any) {
-      setStatus({ type: "error", error: "Camera/microphone access denied" });
+      
+      // Provide more specific error messages
+      let errorMessage = "Camera/microphone access denied";
+      
+      if (error.name === 'NotAllowedError') {
+        errorMessage = "Please allow camera and microphone access and try again";
+      } else if (error.name === 'NotFoundError') {
+        errorMessage = "No camera or microphone found";
+      } else if (error.name === 'NotReadableError') {
+        errorMessage = "Camera/microphone is already in use by another application";
+      } else if (error.name === 'OverconstrainedError') {
+        errorMessage = "Camera/microphone constraints cannot be satisfied";
+      } else if (error.name === 'SecurityError') {
+        errorMessage = "Camera/microphone access blocked due to security policy";
+      }
+      
+      setStatus({ type: "error", error: errorMessage });
       return null;
     }
   }, []);
@@ -129,7 +163,48 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     if (localStream) {
       return localStream;
     }
-    return await getMediaPermissions(constraints);
+    
+    // Try different constraint configurations if the first fails
+    const fallbackConstraints: MediaStreamConstraints[] = [
+      constraints || {
+        audio: {
+          noiseSuppression: true,
+          echoCancellation: true,
+          autoGainControl: true,
+        },
+        video: true
+      },
+      // Fallback 1: Simpler audio constraints
+      {
+        audio: true,
+        video: true
+      },
+      // Fallback 2: Audio only
+      {
+        audio: true,
+        video: false
+      },
+      // Fallback 3: Basic constraints
+      {
+        audio: {},
+        video: {}
+      }
+    ];
+    
+    for (let i = 0; i < fallbackConstraints.length; i++) {
+      const currentConstraints = fallbackConstraints[i];
+      
+      try {
+        const stream = await getMediaPermissions(currentConstraints);
+        if (stream) {
+          return stream;
+        }
+      } catch (error) {
+        continue;
+      }
+    }
+    
+    return null;
   }, [localStream, getMediaPermissions]);
 
   const toggleAudio = useCallback((): boolean => {
@@ -176,6 +251,25 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       setStatus({ type: "calling_peer" });
 
+      // Check permissions first
+      const permissions = await checkMediaPermissions();
+      
+      if (permissions.camera === 'denied' && callType === 'video') {
+        setStatus({ 
+          type: "error", 
+          error: "Camera permission denied. Please allow camera access in your browser settings and refresh the page." 
+        });
+        return false;
+      }
+      
+      if (permissions.microphone === 'denied') {
+        setStatus({ 
+          type: "error", 
+          error: "Microphone permission denied. Please allow microphone access in your browser settings and refresh the page." 
+        });
+        return false;
+      }
+
       const constraints = {
         audio: {
           noiseSuppression: true,
@@ -185,8 +279,12 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         video: callType === 'video'
       };
       
-      const stream = await getMediaPermissions(constraints);
+      const stream = await initializeMedia(constraints);
       if (!stream) {
+        setStatus({ 
+          type: "error", 
+          error: "Failed to access camera/microphone. Please check your device and browser permissions." 
+        });
         return false;
       }
 
@@ -464,13 +562,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         setStatus({ type: "connecting", error: retryMessage });
       }
 
-      console.log(`🔄 [PEER_DEBUG] Attempt ${attempt + 1}: Using config:`, {
-        host: PEER_CONFIG.host,
-        port: PEER_CONFIG.port,
-        secure: PEER_CONFIG.secure,
-        fullUrl: `${PEER_CONFIG.secure ? 'wss' : 'ws'}://${PEER_CONFIG.host}:${PEER_CONFIG.port}${PEER_CONFIG.path}`
-      });
-
       const peer = new Peer(customPeerId, PEER_CONFIG);
       
       // Increase timeout for each attempt
@@ -536,6 +627,18 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [maxConnectionAttempts]);
 
   const initializePeer = useCallback((customName?: string) => {
+    // Prevent multiple concurrent initializations
+    if (initializingRef.current) {
+      return;
+    }
+
+    // Prevent multiple initializations if peer is already connected
+    if (peerRef.current && !peerRef.current.disconnected && !peerRef.current.destroyed) {
+      return;
+    }
+
+    initializingRef.current = true;
+
     if (peerRef.current) {
       try {
         peerRef.current.destroy();
@@ -592,14 +695,10 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
     // Test server connectivity first
     const testServerConnectivity = async (): Promise<void> => {
-      console.log('🔍 [PEER_DEBUG] Testing server connectivity...');
-      
       const protocol = PEER_CONFIG.secure ? 'https' : 'http';
       const serverUrl = `${protocol}://${PEER_CONFIG.host}:${PEER_CONFIG.port}${PEER_CONFIG.path}`;
       
       try {
-        console.log(`🌐 [PEER_DEBUG] Testing: ${serverUrl}`);
-        
         const abortController = new AbortController();
         const timeout = setTimeout(() => abortController.abort(), 5000);
         
@@ -610,9 +709,8 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         });
         
         clearTimeout(timeout);
-        console.log(`✅ [PEER_DEBUG] Server reachable: ${serverUrl}`);
       } catch (error) {
-        console.warn(`❌ [PEER_DEBUG] Server unreachable: ${serverUrl}`, error);
+        // Silently handle server connectivity issues
       }
     };
 
@@ -621,6 +719,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     // Use the retry mechanism
     createPeerWithRetry(customPeerId)
       .then((peer) => {
+        initializingRef.current = false;
         peerRef.current = peer;
         const peerId = peer.id;
         
@@ -681,19 +780,28 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         });
 
         peer.on('disconnected', () => {
-         
+          // Don't auto-reconnect if we're in a call
+          if (activeCallRef.current || incomingCall) {
+            return;
+          }
+          
           setStatus({ type: "idle" });
           setConnectionStatus('disconnected');
+          
+          // Auto-reconnect after a delay
+          setTimeout(() => {
+            if (!peerRef.current || peerRef.current.disconnected) {
+              initializePeer(customName);
+            }
+          }, 3000);
         });
 
         peer.on('close', () => {
-        
           setStatus({ type: "idle" });
           setConnectionStatus('disconnected');
         });
 
         peer.on('error', (error: any) => {
-         
           setStatus({ type: "error", error: error.message || "Connection failed" });
           setConnectionStatus('error');
         });
@@ -701,7 +809,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
        
       })
       .catch((error) => {
-      
+        initializingRef.current = false;
         setIsRetrying(false);
         setStatus({ type: "error", error: error.message || "Connection failed after all attempts" });
         setConnectionStatus('error');
@@ -736,14 +844,17 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
  
 
   useEffect(() => {
-    
-    if (userProfile?.name) {
+    // Only initialize once when user profile is available
+    if (userProfile?.name && !peerRef.current) {
+      console.log('🚀 [PEER_LIFECYCLE] Initializing peer for first time');
       initializePeer(userProfile.name);
-    } else {
+    } else if (!userProfile?.name) {
       setStatus({ type: "waiting_for_name" });
     }
     
     return () => {
+      // Only cleanup on actual unmount, not on every re-render
+      console.log('🧹 [PEER_LIFECYCLE] Component unmounting - cleaning up');
       
       if (activeCallRef.current) {
         activeCallRef.current.close();
@@ -769,6 +880,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       
       if (peerRef.current) {
         try {
+          console.log('🔌 [PEER_LIFECYCLE] Destroying peer connection');
           peerRef.current.destroy();
           peerRef.current = null;
         } catch (error) {}
@@ -782,7 +894,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       
       setStatus({ type: "idle" });
     };
-  }, [userProfile?.name, initializePeer]); 
+  }, [userProfile?.name]); // Remove initializePeer from dependency array 
 
 
   const playNotificationSound = useCallback(() => {
@@ -831,6 +943,35 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch (error) {}
   }, []);
 
+  const checkMediaPermissions = useCallback(async (): Promise<{
+    camera: PermissionState;
+    microphone: PermissionState;
+  }> => {
+    try {
+      if (!navigator.permissions) {
+        return { camera: 'prompt', microphone: 'prompt' };
+      }
+
+      const [cameraPermission, microphonePermission] = await Promise.all([
+        navigator.permissions.query({ name: 'camera' as PermissionName }),
+        navigator.permissions.query({ name: 'microphone' as PermissionName })
+      ]);
+
+      console.log('🔍 [PERMISSION_DEBUG] Current permissions:', {
+        camera: cameraPermission.state,
+        microphone: microphonePermission.state
+      });
+
+      return {
+        camera: cameraPermission.state,
+        microphone: microphonePermission.state
+      };
+    } catch (error) {
+      console.warn('⚠️ [PERMISSION_DEBUG] Permission check failed:', error);
+      return { camera: 'prompt', microphone: 'prompt' };
+    }
+  }, []);
+
 
   const contextValue: PeerContextType = {
     peer: peerRef,
@@ -854,6 +995,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     initializePeerWithName,
     testRingtone: playNotificationSound,
     stopRingtone: stopNotificationSound,
+    checkMediaPermissions,
   };
 
   return (
