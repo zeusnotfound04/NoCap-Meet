@@ -49,14 +49,14 @@ export default function NocapMeetHomePage() {
   } = usePeer();
 
   useEffect(() => {
-    console.log('🏪 [PAGE_DEBUG] Store initialization effect triggered');
+    console.log('[PAGE_DEBUG] Store initialization effect triggered');
     const initialize = async () => {
       try {
-        console.log('🚀 [PAGE_DEBUG] Starting store initialization...');
+        console.log('[PAGE_DEBUG] Starting store initialization...');
         await initializeStore();
-        console.log('✅ [PAGE_DEBUG] Store initialization completed');
+        console.log('[PAGE_DEBUG] Store initialization completed');
       } catch (error) {
-        console.error('❌ [PAGE_DEBUG] Failed to initialize store:', error);
+        console.error('[PAGE_DEBUG] Failed to initialize store:', error);
       }
     };
 
@@ -65,25 +65,24 @@ export default function NocapMeetHomePage() {
 
   useEffect(() => {
     if (currentUserId) {
-      console.log('🆔 [PAGE_DEBUG] Store initialized with user ID:', currentUserId);
+      console.log('[PAGE_DEBUG] Store initialized with user ID:', currentUserId);
     }
   }, [currentUserId]);
 
   useEffect(() => {
     if (userProfile?.name) {
-      console.log('👤 [PAGE_DEBUG] User profile loaded:', userProfile.name);
+      console.log('[PAGE_DEBUG] User profile loaded:', userProfile.name);
       setUserName(userProfile.name);
     }
   }, [userProfile]);
 
   const isStoreReady = !storeLoading && !!currentUserId;
   const isPeerReady = peerStatus.type !== 'idle';
-  // App is ready when store is ready, regardless of peer status (user might need to set up profile first)
   const isAppReady = isStoreReady;
   const hasError = storeError || peerStatus.error;
 
   useEffect(() => {
-    console.log('📊 [PAGE_DEBUG] App state update:', {
+    console.log('[PAGE_DEBUG] App state update:', {
       storeLoading,
       currentUserId,
       peerStatus: peerStatus.type,
@@ -100,17 +99,17 @@ export default function NocapMeetHomePage() {
 
   const handleUserSetup = async () => {
     if (userName.trim()) {
-      console.log('👤 [PAGE_DEBUG] Setting up user with name:', userName.trim());
+      console.log('[PAGE_DEBUG] Setting up user with name:', userName.trim());
       try {
         await initializeUser(userName.trim());
-        console.log('✅ [PAGE_DEBUG] User initialization completed');
+        console.log('[PAGE_DEBUG] User initialization completed');
         
         setTimeout(() => {
-          console.log('🔗 [PAGE_DEBUG] Initializing peer connection...');
+          console.log('[PAGE_DEBUG] Initializing peer connection...');
           initializePeerWithName(userName.trim());
         }, 100);
       } catch (error) {
-        console.error('❌ [PAGE_DEBUG] User setup failed:', error);
+        console.error('[PAGE_DEBUG] User setup failed:', error);
       }
     }
   };
@@ -132,7 +131,6 @@ export default function NocapMeetHomePage() {
         setTimeout(() => setCopied(false), 2000);
       } catch (error) {
         console.error('Failed to copy Call ID:', error);
-        // Fallback for older browsers
         const textArea = document.createElement('textarea');
         textArea.value = myPeerId;
         document.body.appendChild(textArea);

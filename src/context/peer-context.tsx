@@ -73,7 +73,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [myPeerId, setMyPeerId] = useState<string | null>(null);
   
-  // Connection retry state
   const [connectionAttempts, setConnectionAttempts] = useState(0);
   const [maxConnectionAttempts] = useState(2);
   const [isRetrying, setIsRetrying] = useState(false);
@@ -108,16 +107,13 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       setStatus({ type: "permission" });
       
-      // Check if getUserMedia is available
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         setStatus({ type: "error", error: "Microphone not supported in this browser" });
         return null;
       }
 
-      // Try to get permissions
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       
-      // Ensure audio tracks are enabled by default
       const audioTracks = stream.getAudioTracks();
       audioTracks.forEach(track => {
         track.enabled = true;
@@ -129,7 +125,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       
     } catch (error: any) {
       
-      // Provide more specific error messages
       let errorMessage = "Microphone access denied";
       
       if (error.name === 'NotAllowedError') {
@@ -156,7 +151,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       return localStream;
     }
     
-    // Try different constraint configurations if the first fails
     const fallbackConstraints: MediaStreamConstraints[] = [
       constraints || {
         audio: {
@@ -166,19 +160,16 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         },
         video: false
       },
-      // Fallback 1: Basic audio with echo cancellation
       {
         audio: {
           echoCancellation: true,
         },
         video: false
       },
-      // Fallback 2: Basic audio only
       {
         audio: true,
         video: false
       },
-      // Fallback 3: Minimal constraints
       {
         audio: {},
         video: false
@@ -245,7 +236,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       setStatus({ type: "calling_peer" });
 
-      // Check permissions first
       const permissions = await checkMediaPermissions();
       
       if (permissions.microphone === 'denied') {
@@ -274,9 +264,20 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         return false;
       }
 
+      console.log('[MAKE_CALL] Establishing data connection for chat');
       const dataConn = peerRef.current.connect(targetPeerId, { label: "chat" });
       chatConn.current = dataConn;
       setupDataConnection(dataConn);
+
+      console.log('[MAKE_CALL] Initiating call with stream:', {
+        targetPeerId,
+        audioTracks: stream.getAudioTracks().length,
+        metadata: {
+          callerName: userProfile?.name || 'Unknown',
+          callerAvatar: userProfile?.avatar,
+          callType,
+        }
+      });
 
       const call = peerRef.current.call(targetPeerId, stream, {
         metadata: {
@@ -290,7 +291,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       setIncomingCall(call);
       setupCallEventHandlers(call);
       
-      // Enable audio context for better browser compatibility
       try {
         if (typeof AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined') {
           const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -299,7 +299,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
           }
         }
       } catch (error) {
-        // Audio context not supported or failed
       }
 
       currentCallPeerId.current = targetPeerId;
@@ -345,7 +344,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       incomingCall.answer(stream);
       activeCallRef.current = incomingCall;
       
-      // Enable audio context for better browser compatibility
       try {
         if (typeof AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined') {
           const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -354,7 +352,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
           }
         }
       } catch (error) {
-        // Audio context not supported or failed
       }
 
       currentCallPeerId.current = incomingCall.peer;
@@ -419,7 +416,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       setLocalStream(null);
     }
 
-    // Clean up audio elements
     try {
       const remoteAudio = document.getElementById('remote-audio') as HTMLAudioElement;
       if (remoteAudio) {
@@ -427,7 +423,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         remoteAudio.remove();
       }
     } catch (error) {
-      // Silent cleanup
     }
 
     setIncomingCall(null);
@@ -467,33 +462,73 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       }
       
-      // Set up remote audio stream for playback
       try {
         const audioTracks = stream.getAudioTracks();
+        console.log('[AUDIO_DEBUG] Setting up remote audio stream', {
+          audioTracksCount: audioTracks.length,
+          streamId: stream.id,
+          tracksEnabled: audioTracks.map(t => t.enabled)
+        });
         
-        // Create or get existing audio element for remote stream
-        let remoteAudio = document.getElementById('remote-audio') as HTMLAudioElement;
-        if (!remoteAudio) {
-          remoteAudio = document.createElement('audio');
-          remoteAudio.id = 'remote-audio';
-          remoteAudio.autoplay = true;
-          remoteAudio.controls = false;
-          remoteAudio.volume = 1.0;
-          document.body.appendChild(remoteAudio);
+        const existingAudio = document.getElementById('remote-audio') as HTMLAudioElement;
+        if (existingAudio) {
+          existingAudio.srcObject = null;
+          existingAudio.remove();
         }
         
+        const remoteAudio = document.createElement('audio');
+        remoteAudio.id = 'remote-audio';
+        remoteAudio.autoplay = true;
+        remoteAudio.controls = false;
+        remoteAudio.volume = 1.0;
+        remoteAudio.muted = false;
+        
+        remoteAudio.addEventListener('loadstart', () => console.log('[AUDIO_DEBUG] Audio load start'));
+        remoteAudio.addEventListener('canplay', () => console.log('[AUDIO_DEBUG] Audio can play'));
+        remoteAudio.addEventListener('playing', () => console.log('[AUDIO_DEBUG] Audio playing'));
+        remoteAudio.addEventListener('pause', () => console.log('[AUDIO_DEBUG] Audio paused'));
+        remoteAudio.addEventListener('error', (e) => console.error('[AUDIO_DEBUG] Audio error:', e));
+        
+        document.body.appendChild(remoteAudio);
         remoteAudio.srcObject = stream;
         
-        // Ensure the audio plays
-        const playPromise = remoteAudio.play();
-        if (playPromise !== undefined) {
-          playPromise.catch(error => {
-            // Auto-play was prevented, try user interaction
-            console.warn('Auto-play prevented, audio will play after user interaction');
-          });
-        }
+        const playAudio = async () => {
+          try {
+            await remoteAudio.play();
+            console.log('[AUDIO_DEBUG] Audio playback started successfully');
+          } catch (playError) {
+            console.warn('[AUDIO_DEBUG] Auto-play failed:', playError);
+            
+            const enableAudioOnClick = () => {
+              remoteAudio.play()
+                .then(() => {
+                  console.log('[AUDIO_DEBUG] Audio enabled after user interaction');
+                  document.removeEventListener('click', enableAudioOnClick);
+                  document.removeEventListener('touchstart', enableAudioOnClick);
+                })
+                .catch(err => console.error('[AUDIO_DEBUG] Failed to play audio after interaction:', err));
+            };
+            
+            document.addEventListener('click', enableAudioOnClick, { once: true });
+            document.addEventListener('touchstart', enableAudioOnClick, { once: true });
+            
+            try {
+              if (typeof AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined') {
+                const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+                if (audioContext.state === 'suspended') {
+                  audioContext.resume();
+                }
+              }
+            } catch (ctxError) {
+              console.warn('[AUDIO_DEBUG] AudioContext error:', ctxError);
+            }
+          }
+        };
+        
+        setTimeout(playAudio, 100);
+        
       } catch (error) {
-        console.error('Failed to set up remote audio:', error);
+        console.error('[AUDIO_DEBUG] Failed to set up remote audio:', error);
       }
     });
 
@@ -508,14 +543,18 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [endCall, contacts, updateCallHistory, setCallConnected]);
 
   const setupDataConnection = useCallback((conn: DataConnection) => {
-    conn.on('open', () => {});
+    conn.on('open', () => {
+      console.log('[DATA_CONN] Data connection opened with peer:', conn.peer);
+    });
 
     conn.on('data', (data: unknown) => {
+      console.log('[DATA_RECEIVED] Received data:', data);
       
       if (typeof data === 'object' && data !== null && 'type' in data) {
         const peerData = data as PeerData;
         
         if (peerData.type === 'chat' && peerData.payload?.message) {
+          console.log('[CHAT_RECEIVE] Processing chat message:', peerData);
           
           const chatMessage = {
             id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -528,26 +567,42 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
           
           const { addMessage } = useMeetingStore.getState();
           addMessage(chatMessage);
+          console.log('[CHAT_RECEIVE] Message added to store');
         }
       }
     });
 
-    conn.on('close', () => {});
+    conn.on('close', () => {
+      console.log('[DATA_CONN] Data connection closed with peer:', conn.peer);
+    });
 
-    conn.on('error', (error: any) => {});
+    conn.on('error', (error: any) => {
+      console.error('[DATA_CONN] Data connection error:', error);
+    });
   }, []);
 
 
   const sendChatMessage = useCallback((message: string, targetPeerId?: string): boolean => {
+    console.log('[CHAT_SEND] Attempting to send message:', {
+      hasConnection: !!chatConn.current,
+      connectionOpen: chatConn.current?.open,
+      hasUserProfile: !!userProfile,
+      messageLength: message?.length,
+      peerId: myPeerId
+    });
+
     if (!chatConn.current || !chatConn.current.open) {
+      console.error('[CHAT_SEND] No chat connection available');
       return false;
     }
 
     if (!userProfile) {
+      console.error('[CHAT_SEND] No user profile available');
       return false;
     }
 
     if (!message.trim()) {
+      console.error('[CHAT_SEND] Empty message');
       return false;
     }
 
@@ -562,6 +617,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         senderId: myPeerId || '',
       };
 
+      console.log('[CHAT_SEND] Sending chat data:', chatData);
       chatConn.current.send(chatData);
 
       const localMessage = {
@@ -575,9 +631,11 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const { addMessage } = useMeetingStore.getState();
       addMessage(localMessage);
+      console.log('[CHAT_SEND] Message sent successfully');
 
       return true;
     } catch (error) {
+      console.error('[CHAT_SEND] Failed to send message:', error);
       return false;
     }
   }, [userProfile, myPeerId]);
@@ -593,8 +651,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const peer = new Peer(customPeerId, PEER_CONFIG);
       
-      // Increase timeout for each attempt
-      const timeoutDuration = 8000 + (attempt * 4000); // 8s, 12s, 16s
+      const timeoutDuration = 8000 + (attempt * 4000);
       const connectionTimeout = setTimeout(() => {
         peer.destroy();
         
@@ -656,12 +713,10 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [maxConnectionAttempts]);
 
   const initializePeer = useCallback((customName?: string) => {
-    // Prevent multiple concurrent initializations
     if (initializingRef.current) {
       return;
     }
 
-    // Prevent multiple initializations if peer is already connected
     if (peerRef.current && !peerRef.current.disconnected && !peerRef.current.destroyed) {
       return;
     }
@@ -722,7 +777,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
     const customPeerId = generateCustomPeerId();
 
-    // Test server connectivity first
     const testServerConnectivity = async (): Promise<void> => {
       const protocol = PEER_CONFIG.secure ? 'https' : 'http';
       const serverUrl = `${protocol}://${PEER_CONFIG.host}:${PEER_CONFIG.port}${PEER_CONFIG.path}`;
@@ -739,27 +793,40 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         
         clearTimeout(timeout);
       } catch (error) {
-        // Silently handle server connectivity issues
       }
     };
 
     testServerConnectivity();
 
-    // Use the retry mechanism
     createPeerWithRetry(customPeerId)
       .then((peer) => {
         initializingRef.current = false;
         peerRef.current = peer;
         const peerId = peer.id;
         
+        console.log('[PEER_SUCCESS] Peer connection established successfully:', {
+          peerId,
+          host: PEER_CONFIG.host,
+          port: PEER_CONFIG.port,
+          secure: PEER_CONFIG.secure,
+          environment: process.env.NODE_ENV
+        });
+        
         setMyPeerId(peerId);
         setStorePeerId(peerId);
         setConnectionStatus('connected');
         setStatus({ type: "connected" });
 
-        // Setup event handlers for the successfully connected peer
         peer.on('call', (call) => {
+          console.log('[CALL_DEBUG] Incoming call received:', {
+            from: call.peer,
+            metadata: call.metadata,
+            hasActiveCall: !!activeCallRef.current,
+            hasIncomingCall: !!incomingCall
+          });
+
           if (activeCallRef.current || incomingCall) {
+            console.log('[CALL_DEBUG] Rejecting call - already busy');
             call.close();
             return;
           }
@@ -792,24 +859,27 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         });
 
         peer.on('connection', (conn) => {
-         
+          console.log('[DATA_DEBUG] Data connection established:', {
+            peer: conn.peer,
+            label: conn.label,
+            open: conn.open
+          });
           
           if (conn.label === "call_rejected") {
-         
+            console.log('[DATA_DEBUG] Call rejected by remote peer');
             conn.close();
             setStatus({ type: "error", error: "Call was declined" });
             return;
           }
           
           if (conn.label === "chat") {
-           
+            console.log('[CHAT_DEBUG] Chat connection established with peer:', conn.peer);
             chatConn.current = conn;
             setupDataConnection(conn);
           }
         });
 
         peer.on('disconnected', () => {
-          // Don't auto-reconnect if we're in a call
           if (activeCallRef.current || incomingCall) {
             return;
           }
@@ -817,7 +887,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
           setStatus({ type: "idle" });
           setConnectionStatus('disconnected');
           
-          // Auto-reconnect after a delay
           setTimeout(() => {
             if (!peerRef.current || peerRef.current.disconnected) {
               initializePeer(customName);
@@ -873,17 +942,15 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
  
 
   useEffect(() => {
-    // Only initialize once when user profile is available
     if (userProfile?.name && !peerRef.current) {
-      console.log('🚀 [PEER_LIFECYCLE] Initializing peer for first time');
+      console.log('[PEER_LIFECYCLE] Initializing peer for first time');
       initializePeer(userProfile.name);
     } else if (!userProfile?.name) {
       setStatus({ type: "waiting_for_name" });
     }
     
     return () => {
-      // Only cleanup on actual unmount, not on every re-render
-      console.log('🧹 [PEER_LIFECYCLE] Component unmounting - cleaning up');
+      console.log('[PEER_LIFECYCLE] Component unmounting - cleaning up');
       
       if (activeCallRef.current) {
         activeCallRef.current.close();
@@ -909,7 +976,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       
       if (peerRef.current) {
         try {
-          console.log('🔌 [PEER_LIFECYCLE] Destroying peer connection');
+          console.log('[PEER_LIFECYCLE] Destroying peer connection');
           peerRef.current.destroy();
           peerRef.current = null;
         } catch (error) {}

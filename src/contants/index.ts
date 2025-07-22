@@ -1,15 +1,10 @@
-
-// Debug environment variables
-
-// Primary PeerJS configuration
 export const PEER_CONFIG = {
-  // Force the correct values since env vars might not be loading
-  host:  'rootedwriteups.me', 
-  port:  443, 
+  host: process.env.NEXT_PUBLIC_PEERJS_HOST || 'rootedwriteups.me',
+  port: parseInt(process.env.NEXT_PUBLIC_PEERJS_PORT || '443'),
   path: '/nocap-meet/peerjs',
   pingInterval: 5000,
   secure: true, 
-  debug: process.env.NODE_ENV === 'development' ? 2 : 0,
+  debug: process.env.NODE_ENV === 'development' ? 2 : 1,
   config: {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -22,8 +17,7 @@ export const PEER_CONFIG = {
   }
 };
 
-// Log the actual configuration being used
-console.log('🔧 [CONFIG_DEBUG] PeerJS Configuration:', {
+console.log('[CONFIG_DEBUG] PeerJS Configuration:', {
   host: PEER_CONFIG.host,
   port: PEER_CONFIG.port,
   secure: PEER_CONFIG.secure,
@@ -34,8 +28,6 @@ console.log('🔧 [CONFIG_DEBUG] PeerJS Configuration:', {
     portFallback: !process.env.NEXT_PUBLIC_PEERJS_PORT
   }
 });
-
-
 
 export const STORAGE_KEYS = {
   USER_PROFILE: 'nocap_user_profile',

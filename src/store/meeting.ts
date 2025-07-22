@@ -217,9 +217,9 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
       
       try {
         await StorageManager.initializeStorage();
-        console.log(' Store: Redis storage ready');
+        console.log('Store: Redis storage ready');
       } catch (storageError) {
-        console.warn(' Store: Redis initialization failed, using in-memory defaults:', storageError);
+        console.warn('Store: Redis initialization failed, using in-memory defaults:', storageError);
    
         set({ 
           isLoading: false, 
@@ -241,21 +241,21 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
         setTimeout(() => reject(new Error(`Operation timeout after ${ms}ms`)), ms)
       );
       
-      console.log(' Store: Loading user profile...');
+      console.log('Store: Loading user profile...');
       const profile = await Promise.race([
         StorageManager.getUserProfile(actualUserId),
         createTimeoutPromise(3000)
       ]).catch(error => {
-        console.warn(' Store: Failed to load profile:', error);
+        console.warn('Store: Failed to load profile:', error);
         return null;
       });
       
-      console.log(' Store: Loading contacts...');
+      console.log('Store: Loading contacts...');
       const contacts = await Promise.race([
         StorageManager.getContacts(actualUserId),
         createTimeoutPromise(3000)
       ]).catch(error => {
-        console.warn(' Store: Failed to load contacts:', error);
+        console.warn('Store: Failed to load contacts:', error);
         return [] as Contact[];
       });
       
@@ -263,7 +263,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
         StorageManager.getUserPreferences(actualUserId),
         createTimeoutPromise(3000)
       ]).catch(error => {
-        console.warn(' Store: Failed to load preferences:', error);
+        console.warn('Store: Failed to load preferences:', error);
         return {
           theme: 'light' as const,
           notifications: true,
@@ -273,7 +273,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
         };
       });
       
-      console.log(' Store: Data loaded - profile:', !!profile, 'contacts:', (contacts as Contact[]).length || 0, 'preferences:', !!preferences);
+      console.log('Store: Data loaded - profile:', !!profile, 'contacts:', (contacts as Contact[]).length || 0, 'preferences:', !!preferences);
       
       const updates: Partial<MeetingStore> = {
         userProfile: profile as UserProfile | null,
@@ -284,14 +284,14 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
       
       set(updates);
       
-      console.log(' Store: Initialization complete');
+      console.log('Store: Initialization complete');
       
       setTimeout(() => {
         get().loadCallHistory().catch(console.warn);
       }, 100);
       
     } catch (error) {
-      console.error(' Store: Initialization failed:', error);
+      console.error('Store: Initialization failed:', error);
       
       set({ 
         isLoading: false, 
@@ -307,7 +307,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
         }
       });
       
-      console.log(' Store: Using default values due to storage error');
+      console.log('Store: Using default values due to storage error');
     }
   },
   
@@ -317,7 +317,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
   
   initializeUser: async (name: string, userId?: string) => {
     try {
-      console.log(' Store: Initializing user:', name);
+      console.log('Store: Initializing user:', name);
       
       const actualUserId = userId || get().currentUserId || getOrCreateUserId();
       if (!get().currentUserId) {
@@ -348,7 +348,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
       set({ userProfile: profile });
       
     } catch (error) {
-      console.error(' Store: Failed to initialize user:', error);
+      console.error('Store: Failed to initialize user:', error);
       set({ error: 'Failed to save user profile' });
     }
   },
@@ -363,7 +363,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
         set({ userProfile: updated });
       }
     } catch (error) {
-      console.error(' Store: Failed to update user profile:', error);
+      console.error('Store: Failed to update user profile:', error);
     }
   },
   
@@ -378,7 +378,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
         }
       }
     } catch (error) {
-      console.error(' Store: Failed to update user status:', error);
+      console.error('Store: Failed to update user status:', error);
     }
   },
   
@@ -432,7 +432,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
       set({ contacts: updated });
       
     } catch (error) {
-      console.error('❌ Store: Failed to add contact:', error);
+      console.error('Store: Failed to add contact:', error);
       set({ error: 'Failed to add contact' });
     }
   },
@@ -450,7 +450,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
       set({ contacts: contacts.filter(c => c.peerId !== peerId) });
       
     } catch (error) {
-      console.error(' Store: Failed to remove contact:', error);
+      console.error('Store: Failed to remove contact:', error);
     }
   },
   
@@ -470,7 +470,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
         set({ contacts: updated });
       }
     } catch (error) {
-      console.error(' Store: Failed to update contact:', error);
+      console.error('Store: Failed to update contact:', error);
     }
   },
   
@@ -482,7 +482,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
       await StorageManager.toggleContactFavorite(peerId, userId);
       await get().loadContacts();
     } catch (error) {
-      console.error(' Store: Failed to toggle favorite:', error);
+      console.error('Store: Failed to toggle favorite:', error);
     }
   },
   
@@ -494,7 +494,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
       const contacts = await StorageManager.getContacts(userId);
       set({ contacts });
     } catch (error) {
-      console.error(' Store: Failed to load contacts:', error);
+      console.error('Store: Failed to load contacts:', error);
     }
   },
   
@@ -594,7 +594,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
         callDuration: 0,
       }
     });
-    console.log(' Store: Call marked as connected, timer started');
+    console.log('Store: Call marked as connected, timer started');
   },
   
   updateCallDuration: () => {
@@ -622,7 +622,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
       };
       set({ callHistory: [newCall, ...history].slice(0, 50) });
     } catch (error) {
-      console.error(' Store: Failed to add call to history:', error);
+      console.error('Store: Failed to add call to history:', error);
     }
   },
 
@@ -644,7 +644,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
       
       await StorageManager.updateCallHistory(userId, peerId, updates);
     } catch (error) {
-      console.error(' Store: Failed to update call history:', error);
+      console.error('Store: Failed to update call history:', error);
     }
   },
   
@@ -656,7 +656,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
       const history = await StorageManager.getCallHistory(userId);
       set({ callHistory: history });
     } catch (error) {
-      console.error(' Store: Failed to load call history:', error);
+      console.error('Store: Failed to load call history:', error);
     }
   },
   
@@ -668,7 +668,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
       await StorageManager.clearCallHistory(userId);
       set({ callHistory: [] });
     } catch (error) {
-      console.error(' Store: Failed to clear call history:', error);
+      console.error('Store: Failed to clear call history:', error);
     }
   },
   
@@ -739,7 +739,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
       await StorageManager.setUserPreferences(updated, userId);
       set({ userPreferences: updated });
     } catch (error) {
-      console.error(' Store: Failed to update preferences:', error);
+      console.error('Store: Failed to update preferences:', error);
     }
   },
   
@@ -754,11 +754,10 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
       await StorageManager.setDeviceSettings(updated, userId);
       set({ deviceSettings: updated });
     } catch (error) {
-      console.error(' Store: Failed to update device settings:', error);
+      console.error('Store: Failed to update device settings:', error);
     }
   },
   
-  // ===== RECENT ROOMS =====
   
   addRecentRoom: async (roomId: string, roomName?: string) => {
     try {
@@ -769,7 +768,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
       const rooms = await StorageManager.getRecentRooms(userId);
       set({ recentRooms: rooms });
     } catch (error) {
-      console.error(' Store: Failed to add recent room:', error);
+      console.error('Store: Failed to add recent room:', error);
     }
   },
   
@@ -781,7 +780,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
       await StorageManager.clearRecentRooms(userId);
       set({ recentRooms: [] });
     } catch (error) {
-      console.error(' Store: Failed to clear recent rooms:', error);
+      console.error('Store: Failed to clear recent rooms:', error);
     }
   },
   
@@ -833,7 +832,7 @@ export const useMeetingStore = create<MeetingStore>((set, get) => ({
         },
       });
     } catch (error) {
-      console.error(' Store: Failed to clear all data:', error);
+      console.error('Store: Failed to clear all data:', error);
     }
   },
 }));

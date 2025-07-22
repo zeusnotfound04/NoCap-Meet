@@ -71,7 +71,6 @@ const getFromStorage = async (key: string): Promise<string | null> => {
       return await redisClient.get(key);
     }
   } catch (error) {
-    // Silent fallback
   }
   return memoryStorage.get(key) || null;
 };
@@ -87,7 +86,6 @@ const setToStorage = async (key: string, value: string, expireSeconds?: number):
       return;
     }
   } catch (error) {
-    // Silent fallback
   }
   memoryStorage.set(key, value);
 };
@@ -99,7 +97,6 @@ const deleteFromStorage = async (key: string): Promise<void> => {
       return;
     }
   } catch (error) {
-    // Silent fallback
   }
   memoryStorage.delete(key);
 };
@@ -259,7 +256,6 @@ export class RedisStorageManager {
         await this.setUserProfile(profile, userId);
       }
     } catch (err) {
-      // Silent fail
     }
   }
 
@@ -271,7 +267,6 @@ export class RedisStorageManager {
         await this.setUserProfile(profile, userId);
       }
     } catch (err) {
-      // Silent fail
     }
   }
 
@@ -336,7 +331,6 @@ export class RedisStorageManager {
       const key = createKey(userId, STORAGE_KEYS.CONTACTS);
       await setToStorage(key, JSON.stringify(updated));
     } catch (error) {
-      // Silent fail
     }
   }
 
@@ -352,7 +346,6 @@ export class RedisStorageManager {
       const key = createKey(userId, STORAGE_KEYS.CONTACTS);
       await setToStorage(key, JSON.stringify(updated));
     } catch (error) {
-      // Silent fail
     }
   }
 
@@ -391,7 +384,6 @@ export class RedisStorageManager {
       const key = createKey(userId, STORAGE_KEYS.CALL_HISTORY);
       await setToStorage(key, JSON.stringify(updated));
     } catch (error) {
-      // Silent fail
     }
   }
 
@@ -418,7 +410,6 @@ export class RedisStorageManager {
         await setToStorage(key, JSON.stringify(updatedHistory));
       }
     } catch (error) {
-      // Silent fail
     }
   }
 
@@ -427,7 +418,6 @@ export class RedisStorageManager {
       const key = createKey(userId, STORAGE_KEYS.CALL_HISTORY);
       await deleteFromStorage(key);
     } catch (error) {
-      // Silent fail
     }
   }
 
@@ -477,7 +467,6 @@ export class RedisStorageManager {
       const key = createKey(userId, STORAGE_KEYS.USER_PREFERENCES);
       await setToStorage(key, JSON.stringify(updated));
     } catch (error) {
-      // Silent fail
     }
   }
 
@@ -516,7 +505,6 @@ export class RedisStorageManager {
       const key = createKey(userId, STORAGE_KEYS.RECENT_ROOMS);
       await setToStorage(key, JSON.stringify(updated));
     } catch (error) {
-      // Silent fail
     }
   }
 
@@ -525,7 +513,6 @@ export class RedisStorageManager {
       const key = createKey(userId, STORAGE_KEYS.RECENT_ROOMS);
       await deleteFromStorage(key);
     } catch (error) {
-      // Silent fail
     }
   }
 
@@ -543,7 +530,6 @@ export class RedisStorageManager {
       const key = createKey(userId, STORAGE_KEYS.DEVICE_SETTINGS);
       await setToStorage(key, JSON.stringify(updated));
     } catch (error) {
-      // Silent fail
     }
   }
 
@@ -662,7 +648,6 @@ export class RedisStorageManager {
         await redisClient.quit();
       }
     } catch (error) {
-      // Silent fail
     }
   }
 

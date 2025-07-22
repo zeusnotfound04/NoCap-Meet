@@ -62,21 +62,38 @@ export function CallInterface() {
     const newState = toggleAudio();
     setIsAudioMuted(!newState);
     
-    // Also try to resume audio context and remote audio if needed
+    console.log('[AUDIO_TOGGLE] Local audio toggled:', { newState, muted: !newState });
+    
     try {
       const remoteAudio = document.getElementById('remote-audio') as HTMLAudioElement;
-      if (remoteAudio && remoteAudio.paused) {
-        remoteAudio.play().catch(() => {});
+      if (remoteAudio) {
+        console.log('[AUDIO_TOGGLE] Remote audio element found:', {
+          paused: remoteAudio.paused,
+          volume: remoteAudio.volume,
+          muted: remoteAudio.muted,
+          srcObject: !!remoteAudio.srcObject
+        });
+        
+        if (remoteAudio.paused) {
+          remoteAudio.play()
+            .then(() => console.log('[AUDIO_TOGGLE] Remote audio resumed'))
+            .catch(err => console.warn('[AUDIO_TOGGLE] Failed to resume remote audio:', err));
+        }
+      } else {
+        console.warn('[AUDIO_TOGGLE] Remote audio element not found');
       }
       
       if (typeof AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined') {
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        console.log('[AUDIO_TOGGLE] AudioContext state:', audioContext.state);
         if (audioContext.state === 'suspended') {
-          audioContext.resume();
+          audioContext.resume()
+            .then(() => console.log('[AUDIO_TOGGLE] AudioContext resumed'))
+            .catch(err => console.warn('[AUDIO_TOGGLE] Failed to resume AudioContext:', err));
         }
       }
     } catch (error) {
-      // Silent fail
+      console.error('[AUDIO_TOGGLE] Error in audio toggle:', error);
     }
   };
 
@@ -103,7 +120,6 @@ export function CallInterface() {
 
   return (
     <div className="fixed inset-0 bg-gradient-to-br from-white via-blue-50 to-blue-100 z-50 flex flex-col">
-      {/* Header */}
       <div className="bg-white bg-opacity-90 backdrop-blur-md border-b border-gray-200 text-gray-800 p-8 shadow-sm">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-6">
@@ -139,9 +155,7 @@ export function CallInterface() {
         </div>
       </div>
 
-      {/* Main Call Area */}
       <div className="flex-1 flex items-center justify-center relative">
-        {/* Subtle Dot Pattern Background */}
         <div 
           className="absolute inset-0 opacity-[0.03]"
           style={{
@@ -150,10 +164,8 @@ export function CallInterface() {
           }}
         />
 
-        {/* Subtle Blue Gradient Overlay */}
         <div className="absolute inset-0 bg-gradient-to-b from-blue-50 via-transparent to-blue-100 opacity-50" />
 
-        {/* Audio Wave Animation */}
         <div className="absolute inset-0 flex items-center justify-center opacity-10">
           <div className="flex space-x-2">
             {Array.from({ length: 7 }).map((_, i) => (
@@ -169,7 +181,6 @@ export function CallInterface() {
           </div>
         </div>
 
-        {/* Remote User Profile */}
         <div className="flex flex-col items-center text-gray-800 z-10">
           <div className="relative mb-10">
             <div className="w-56 h-56 relative">
@@ -185,10 +196,8 @@ export function CallInterface() {
                 </div>
               )}
               
-              {/* Pulse Ring Animation */}
               <div className="absolute inset-0 rounded-full border-2 border-blue-400 border-opacity-30 animate-ping" />
               
-              {/* Status indicator */}
               <div className="absolute -bottom-2 -right-2 w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-xl ring-2 ring-blue-100">
                 <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
               </div>
@@ -202,7 +211,6 @@ export function CallInterface() {
           </div>
         </div>
 
-        {/* Local User Profile (corner) */}
         <div className="absolute top-8 right-8 flex flex-col items-center">
           <div className="relative">
             <div className="w-20 h-20 relative">
@@ -234,13 +242,15 @@ export function CallInterface() {
             <span className="font-medium">Microphone muted</span>
           </div>
         )}
+        
+        <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 bg-blue-100 bg-opacity-90 backdrop-blur-md text-gray-700 px-4 py-2 rounded-lg text-sm shadow-lg border border-blue-200">
+          <span className="text-xs">If you can't hear audio, try clicking anywhere or toggle the microphone</span>
+        </div>
       </div>
 
-      {/* Controls */}
       <div className="bg-white bg-opacity-95 backdrop-blur-md border-t border-gray-200 p-8 shadow-lg">
         <div className="max-w-md mx-auto">
           <div className="flex items-center justify-center gap-12">
-            {/* Audio Toggle */}
             <Button
               variant="ghost"
               size="lg"
@@ -255,7 +265,6 @@ export function CallInterface() {
               {isAudioMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
             </Button>
 
-            {/* End Call */}
             <Button
               variant="destructive"
               size="lg"
@@ -266,7 +275,6 @@ export function CallInterface() {
               <PhoneOff className="w-8 h-8" />
             </Button>
 
-            {/* Chat Toggle */}
             <Button
               variant="ghost"
               size="lg"
@@ -291,10 +299,8 @@ export function CallInterface() {
         </div>
       </div>
 
-      {/* Chat Window */}
       {isChatOpen && <ChatWindow />}
 
-      {/* Chat Toggle Button (alternative placement if needed) */}
       <ChatToggleButton />
     </div>
   );

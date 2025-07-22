@@ -82,7 +82,6 @@ export async function DELETE(request: NextRequest) {
   }
 }
 
-// PATCH /api/call-history
 export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();

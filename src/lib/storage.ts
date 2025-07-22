@@ -22,9 +22,9 @@ export class StorageManager {
   static async initializeStorage(): Promise<void> {
     try {
       await this.apiCall('/storage/status');
-      console.log(' Storage connection verified');
+      console.log('Storage connection verified');
     } catch (error) {
-      console.error(' Storage initialization failed:', error);
+      console.error('Storage initialization failed:', error);
       throw error;
     }
   }
@@ -34,7 +34,7 @@ export class StorageManager {
       await this.initializeStorage();
       return true;
     } catch (error) {
-      console.error(' Graceful storage init failed:', error);
+      console.error('Graceful storage init failed:', error);
       return false;
     }
   }
@@ -63,18 +63,18 @@ export class StorageManager {
         body: JSON.stringify({ userId, profile }),
       });
     } catch (err) {
-      console.error(" Error while storing the user profile", err);
+      console.error("Error while storing the user profile", err);
       throw err;
     }
   }
 
   static async getUserProfile(userId: string): Promise<UserProfile | null> {
     try {
-      console.log('🔍 StorageManager: Getting user profile...');
+      console.log('StorageManager: Getting user profile...');
       const result = await this.apiCall(`/user/profile?userId=${userId}`);
       return result.data;
     } catch (err) {
-      console.error("❌ Error While getting the user profile", err);
+      console.error("Error While getting the user profile", err);
       return null;
     }
   }
@@ -107,7 +107,7 @@ export class StorageManager {
       const result = await this.apiCall(`/contacts?userId=${userId}`);
       return result.data || [];
     } catch (error) {
-      console.error(' Failed to get contacts:', error);
+      console.error('Failed to get contacts:', error);
       return [];
     }
   }
@@ -224,7 +224,7 @@ export class StorageManager {
       const result = await this.apiCall(`/user/preferences?userId=${userId}`);
       return result.data;
     } catch (error) {
-      console.error(' Failed to get user preferences:', error);
+      console.error('Failed to get user preferences:', error);
       return {
         theme: 'light',
         notifications: true,
@@ -332,7 +332,7 @@ export class StorageManager {
       const result = await this.apiCall(`/storage/info?userId=${userId}`);
       return result.data;
     } catch (error) {
-      console.error(' Failed to get storage info:', error);
+      console.error('Failed to get storage info:', error);
       return { keys: [], usage: {}, totalSize: 0 };
     }
   }
@@ -340,10 +340,10 @@ export class StorageManager {
   static async exportAllData(userId: string): Promise<any> {
     try {
       const result = await this.apiCall(`/storage/export?userId=${userId}`);
-      console.log(' Data exported successfully');
+      console.log('Data exported successfully');
       return result.data;
     } catch (error) {
-      console.error(' Failed to export data:', error);
+      console.error('Failed to export data:', error);
       return {};
     }
   }
@@ -375,11 +375,11 @@ export class StorageManager {
   }
 
   static async disconnect(): Promise<void> {
-    console.log(' Client-side storage manager - no connection to close');
+    console.log('Client-side storage manager - no connection to close');
   }
 
   static getRedisClient(): null {
-    console.warn(' Redis client is not available on client-side');
+    console.warn('Redis client is not available on client-side');
     return null;
   }
 

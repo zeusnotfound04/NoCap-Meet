@@ -37,7 +37,6 @@ export const ChatToggleButton: React.FC = () => {
           <MessageCircle className="w-6 h-6 text-white" />
         )}
         
-        {/* Unread Messages Badge */}
         {unreadCount > 0 && !isChatOpen && (
           <div className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-semibold">
             {unreadCount > 99 ? '99+' : unreadCount}

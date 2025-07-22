@@ -96,7 +96,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         : 'bottom-4 right-4 w-80 h-16'
     }`}>
       <Card className="h-full shadow-2xl border-2 border-blue-200 bg-white/95 backdrop-blur-sm">
-        {/* Header */}
         <CardHeader className="pb-2 bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-t-lg">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -131,7 +130,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
           </div>
           
-          {/* Connection Status */}
           <div className="text-xs text-blue-100">
             {!isConnected ? (
               <span className="flex items-center gap-1">
@@ -152,10 +150,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         </CardHeader>
 
-        {/* Chat Content */}
         {isExpanded && (
           <CardContent className="p-0 flex flex-col h-full">
-            {/* Messages Area */}
             <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-2 md:space-y-3 min-h-0" 
                  style={{ 
                    maxHeight: 'calc(100vh - 200px)', 
@@ -215,7 +211,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Message Input */}
             <div className="p-3 md:p-4 border-t bg-gray-50/90 backdrop-blur-sm">
               {canSendMessage ? (
                 <div className="space-y-2">

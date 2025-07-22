@@ -11,14 +11,14 @@ export const RingtoneTestButton: React.FC = () => {
         className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
         disabled={status.type === 'in_call'}
       >
-        🔊 Test Ringtone
+        Test Ringtone
       </button>
       
       <button 
         onClick={stopRingtone}
         className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
       >
-        🔇 Stop Ringtone
+        Stop Ringtone
       </button>
       
       <div className="flex items-center text-sm text-gray-600">
