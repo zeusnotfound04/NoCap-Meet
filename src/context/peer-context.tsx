@@ -477,7 +477,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
           remoteAudio = document.createElement('audio');
           remoteAudio.id = 'remote-audio';
           remoteAudio.autoplay = true;
-          remoteAudio.playsInline = true;
           remoteAudio.controls = false;
           remoteAudio.volume = 1.0;
           document.body.appendChild(remoteAudio);
