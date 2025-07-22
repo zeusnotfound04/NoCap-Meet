@@ -464,6 +464,13 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         setStatus({ type: "connecting", error: retryMessage });
       }
 
+      console.log(`🔄 [PEER_DEBUG] Attempt ${attempt + 1}: Using config:`, {
+        host: PEER_CONFIG.host,
+        port: PEER_CONFIG.port,
+        secure: PEER_CONFIG.secure,
+        fullUrl: `${PEER_CONFIG.secure ? 'wss' : 'ws'}://${PEER_CONFIG.host}:${PEER_CONFIG.port}${PEER_CONFIG.path}`
+      });
+
       const peer = new Peer(customPeerId, PEER_CONFIG);
       
       // Increase timeout for each attempt
@@ -584,23 +591,28 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     const customPeerId = generateCustomPeerId();
 
     // Test server connectivity first
-    const testServerConnectivity = async (): Promise<boolean> => {
+    const testServerConnectivity = async (): Promise<void> => {
+      console.log('🔍 [PEER_DEBUG] Testing server connectivity...');
+      
+      const protocol = PEER_CONFIG.secure ? 'https' : 'http';
+      const serverUrl = `${protocol}://${PEER_CONFIG.host}:${PEER_CONFIG.port}${PEER_CONFIG.path}`;
+      
       try {
-        const serverUrl = `http://${PEER_CONFIG.host}:${PEER_CONFIG.port}`;
+        console.log(`🌐 [PEER_DEBUG] Testing: ${serverUrl}`);
         
         const abortController = new AbortController();
         const timeout = setTimeout(() => abortController.abort(), 5000);
         
         const response = await fetch(serverUrl, { 
-          method: 'HEAD', 
+          method: 'GET', 
           mode: 'no-cors',
           signal: abortController.signal
         });
         
         clearTimeout(timeout);
-        return true;
+        console.log(`✅ [PEER_DEBUG] Server reachable: ${serverUrl}`);
       } catch (error) {
-        return false;
+        console.warn(`❌ [PEER_DEBUG] Server unreachable: ${serverUrl}`, error);
       }
     };
 

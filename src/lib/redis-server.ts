@@ -15,35 +15,47 @@ interface RedisConfig {
 let isRedisConfigured = false;
 let redisClient: Redis | null = null;
 
+// In-memory fallback storage when Redis is not available
+const memoryStorage = new Map<string, string>();
+
 const configureRedis = (): boolean => {
   if (redisClient && isRedisConfigured) {
     return true;
   }
 
   try {
-    redisClient = new Redis(process.env.REDIS_URL!, {
-      maxRetriesPerRequest: 3,
-      lazyConnect: true,
-    });
+    // Check if REDIS_URL exists
+    if (!process.env.REDIS_URL) {
+      console.warn('⚠️ REDIS_URL not found, using memory storage fallback');
+      return false;
+    }
+
+    redisClient = new Redis(process.env.REDIS_URL!);
 
     redisClient.on('connect', () => {
+      console.log('✅ Redis connected successfully');
       isRedisConfigured = true;
     });
 
     redisClient.on('error', (error: any) => {
-      console.error(' Redis connection error:', error);
+      console.warn('⚠️ Redis connection error, falling back to memory storage:', error.message);
       isRedisConfigured = false;
     });
 
     redisClient.on('close', () => {
-      console.log('🔌 Redis connection closed');
+      console.log('🔌 Redis connection closed, using memory storage');
       isRedisConfigured = false;
     });
 
-    console.log(' Redis client configured successfully');
+    redisClient.on('reconnecting', () => {
+      console.log('🔄 Redis reconnecting...');
+      isRedisConfigured = false;
+    });
+
+    console.log('🔧 Redis client configured successfully');
     return true;
   } catch (error) {
-    console.error(" Redis configuration error:", error);
+    console.warn("⚠️ Redis configuration error, using memory storage:", error);
     return false;
   }
 };
@@ -60,6 +72,25 @@ export const STORAGE_KEYS = {
 // Helper function to create namespaced keys
 const createKey = (userId: string, key: string): string => {
   return `nocap-meet:${userId}:${key}`;
+};
+
+// Memory storage fallback functions
+const setMemory = (key: string, value: string): void => {
+  memoryStorage.set(key, value);
+};
+
+const getMemory = (key: string): string | null => {
+  return memoryStorage.get(key) || null;
+};
+
+const delMemory = (key: string): void => {
+  memoryStorage.delete(key);
+};
+
+const keysMemory = (pattern: string): string[] => {
+  const keys = Array.from(memoryStorage.keys());
+  const regex = new RegExp(pattern.replace('*', '.*'));
+  return keys.filter(key => regex.test(key));
 };
 
 export class RedisStorageManager {
@@ -175,54 +206,90 @@ export class RedisStorageManager {
   }
   private static async ensureRedisReady(): Promise<boolean> {
     try {
-      if (!isRedisConfigured || !redisClient) {
-        const success = await this.initializeStorageGraceful();
-        if (!success) {
-          console.warn(' Redis not ready, operations may fail');
-          return false;
-        }
+      if (!redisClient) {
+        configureRedis();
+        if (!redisClient) return false;
       }
-      
-      // Quick ping to ensure connection is alive
-      await redisClient!.ping();
+
+      // Check if already connected
+      if (isRedisConfigured && redisClient.status === 'ready') {
+        return true;
+      }
+
+      // Quick ping with timeout to check if connection is alive
+      const pingPromise = redisClient.ping();
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Ping timeout')), 2000);
+      });
+
+      await Promise.race([pingPromise, timeoutPromise]);
+      isRedisConfigured = true;
       return true;
     } catch (error) {
-      console.error(' Failed to ensure Redis ready:', error);
+      console.warn('⚠️ Redis not ready, using memory storage:', error);
+      isRedisConfigured = false;
       return false;
     }
   }
 
   static async setUserProfile(profile: UserProfile, userId: string): Promise<void> {
     try {
-      await this.ensureRedisReady();
-      if (!redisClient) throw new Error('Redis client not available');
-      
       const key = createKey(userId, STORAGE_KEYS.USER_PROFILE);
-      await redisClient.set(key, JSON.stringify(profile));
+      const value = JSON.stringify(profile);
+      
+      // Try Redis first
+      if (await this.ensureRedisReady() && redisClient) {
+        await redisClient.set(key, value);
+        console.log('✅ User profile saved to Redis');
+        return;
+      }
+      
+      // Fallback to memory storage
+      setMemory(key, value);
+      console.log('💾 User profile saved to memory storage (Redis unavailable)');
     } catch (err) {
-      console.error(" Error while storing the user profile", err);
-      throw err;
+      // Final fallback to memory storage
+      const key = createKey(userId, STORAGE_KEYS.USER_PROFILE);
+      const value = JSON.stringify(profile);
+      setMemory(key, value);
+      console.log('💾 User profile saved to memory storage (fallback)', err);
     }
   }
 
   static async getUserProfile(userId: string): Promise<UserProfile | null> {
     try {
       console.log('🔍 RedisStorageManager: Getting user profile...');
-      await this.ensureRedisReady();
-      if (!redisClient) throw new Error('Redis client not available');
-      
       const key = createKey(userId, STORAGE_KEYS.USER_PROFILE);
-      const profileData = await redisClient.get(key);
       
-      if (!profileData) {
-        console.log(' RedisStorageManager: No user profile found');
-        return null;
+      // Try Redis first
+      if (await this.ensureRedisReady() && redisClient) {
+        const profileData = await redisClient.get(key);
+        if (profileData) {
+          console.log('✅ User profile retrieved from Redis');
+          return JSON.parse(profileData) as UserProfile;
+        }
       }
       
-      const profile = JSON.parse(profileData) as UserProfile;
-      return profile;
+      // Fallback to memory storage
+      const memoryData = getMemory(key);
+      if (memoryData) {
+        console.log('💾 User profile retrieved from memory storage');
+        return JSON.parse(memoryData) as UserProfile;
+      }
+      
+      console.log('❌ No user profile found');
+      return null;
     } catch (err) {
-      console.error(" Error While getting the user profile", err);
+      console.error("❌ Error while getting user profile", err);
+      
+      // Try memory storage as final fallback
+      const key = createKey(userId, STORAGE_KEYS.USER_PROFILE);
+      const memoryData = getMemory(key);
+      if (memoryData) {
+        console.log('💾 User profile retrieved from memory storage (fallback)');
+        return JSON.parse(memoryData) as UserProfile;
+      }
+      
       return null;
     }
   }
@@ -433,11 +500,7 @@ export class RedisStorageManager {
   static async getUserPreferences(userId: string): Promise<any> {
     try {
       console.log('🔍 RedisStorageManager: Getting user preferences...');
-      await this.ensureRedisReady();
-      if (!redisClient) throw new Error('Redis client not available');
-      
       const key = createKey(userId, STORAGE_KEYS.USER_PREFERENCES);
-      const preferencesData = await redisClient.get(key);
       
       const defaultPreferences = {
         theme: 'light',
@@ -447,14 +510,26 @@ export class RedisStorageManager {
         soundEnabled: true,
       };
       
-      if (!preferencesData) {
-        console.log(' RedisStorageManager: Using default preferences');
-        return defaultPreferences;
+      // Try Redis first
+      if (await this.ensureRedisReady() && redisClient) {
+        const preferencesData = await redisClient.get(key);
+        if (preferencesData) {
+          console.log('✅ User preferences retrieved from Redis');
+          const preferences = JSON.parse(preferencesData);
+          return { ...defaultPreferences, ...preferences };
+        }
       }
       
-      const preferences = JSON.parse(preferencesData);
-      console.log(' RedisStorageManager: User preferences retrieved:', !!preferences);
-      return { ...defaultPreferences, ...preferences };
+      // Fallback to memory storage
+      const memoryData = getMemory(key);
+      if (memoryData) {
+        console.log('💾 User preferences retrieved from memory storage');
+        const preferences = JSON.parse(memoryData);
+        return { ...defaultPreferences, ...preferences };
+      }
+      
+      console.log('💾 Using default preferences');
+      return defaultPreferences;
     } catch (error) {
       console.error('❌ Failed to get user preferences:', error);
       return {

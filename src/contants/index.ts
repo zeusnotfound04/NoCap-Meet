@@ -1,8 +1,11 @@
 
-// PeerJS configuration
+// Debug environment variables
+
+// Primary PeerJS configuration
 export const PEER_CONFIG = {
-  host: process.env.NEXT_PUBLIC_PEERJS_HOST || 'localhost', 
-  port: parseInt(process.env.NEXT_PUBLIC_PEERJS_PORT || '9000'), 
+  // Force the correct values since env vars might not be loading
+  host:  'rootedwriteups.me', 
+  port:  443, 
   path: '/nocap-meet/peerjs',
   
   secure: true, 
@@ -18,6 +21,20 @@ export const PEER_CONFIG = {
     ]
   }
 };
+
+// Log the actual configuration being used
+console.log('🔧 [CONFIG_DEBUG] PeerJS Configuration:', {
+  host: PEER_CONFIG.host,
+  port: PEER_CONFIG.port,
+  secure: PEER_CONFIG.secure,
+  path: PEER_CONFIG.path,
+  fullUrl: `${PEER_CONFIG.secure ? 'wss' : 'ws'}://${PEER_CONFIG.host}:${PEER_CONFIG.port}${PEER_CONFIG.path}`,
+  fallbackUsed: {
+    hostFallback: !process.env.NEXT_PUBLIC_PEERJS_HOST,
+    portFallback: !process.env.NEXT_PUBLIC_PEERJS_PORT
+  }
+});
+
 
 
 export const STORAGE_KEYS = {
