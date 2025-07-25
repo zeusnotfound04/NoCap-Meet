@@ -1,7 +1,8 @@
 export const PEER_CONFIG = {
-  host: process.env.NEXT_PUBLIC_PEERJS_HOST || 'rootedwriteups.me',
-  port: parseInt(process.env.NEXT_PUBLIC_PEERJS_PORT || '443'),
+  host:  'rootedwriteups.me', 
+  port:  443, 
   path: '/nocap-meet/peerjs',
+
   pingInterval: 5000,
   secure: true, 
   debug: process.env.NODE_ENV === 'development' ? 2 : 1,

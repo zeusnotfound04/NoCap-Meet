@@ -42,7 +42,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const { 
     sendChatMessage, 
     isConnected,
-    status 
+    status,
+    chatConn
   } = usePeer();
 
   const scrollToBottom = () => {
@@ -85,7 +86,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   };
 
   const isInCall = status.type === 'in_call' || status.type === 'calling_peer';
-  const canSendMessage = isConnected && isInCall;
+  // Allow sending messages if we're connected and in call, OR if we have an active chat connection
+  const canSendMessage = (isConnected && isInCall) || (chatConn?.current?.open);
+
+  console.log('[CHAT_DEBUG] Chat conditions:', {
+    status: status.type,
+    isConnected,
+    isInCall,
+    canSendMessage,
+    chatConnOpen: chatConn?.current?.open
+  });
 
   if (!isChatOpen) return null;
 

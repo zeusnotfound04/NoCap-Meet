@@ -291,14 +291,18 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       setIncomingCall(call);
       setupCallEventHandlers(call);
       
+      // Resume AudioContext when making a call
       try {
         if (typeof AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined') {
           const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+          console.log('[MAKE_CALL] AudioContext state:', audioContext.state);
           if (audioContext.state === 'suspended') {
-            audioContext.resume();
+            await audioContext.resume();
+            console.log('[MAKE_CALL] AudioContext resumed successfully');
           }
         }
       } catch (error) {
+        console.warn('[MAKE_CALL] Failed to resume AudioContext:', error);
       }
 
       currentCallPeerId.current = targetPeerId;
@@ -344,19 +348,25 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       incomingCall.answer(stream);
       activeCallRef.current = incomingCall;
       
+      // Resume AudioContext immediately when accepting call
       try {
         if (typeof AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined') {
           const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+          console.log('[ACCEPT_CALL] AudioContext state:', audioContext.state);
           if (audioContext.state === 'suspended') {
-            audioContext.resume();
+            await audioContext.resume();
+            console.log('[ACCEPT_CALL] AudioContext resumed successfully');
           }
         }
       } catch (error) {
+        console.warn('[ACCEPT_CALL] Failed to resume AudioContext:', error);
       }
 
       currentCallPeerId.current = incomingCall.peer;
 
+      // Establish chat connection if not already connected
       if (!chatConn.current && peerRef.current) {
+        console.log('[ACCEPT_CALL] Setting up chat connection');
         const dataConn = peerRef.current.connect(incomingCall.peer, { label: "chat" });
         chatConn.current = dataConn;
         setupDataConnection(dataConn);
@@ -364,8 +374,10 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
       storeAcceptCall();
       setStatus({ type: "in_call" });
+      console.log('[ACCEPT_CALL] Call accepted, status set to in_call');
       
     } catch (error: any) {
+      console.error('[ACCEPT_CALL] Error accepting call:', error);
       setStatus({ type: "error", error: error.message || "Failed to accept call" });
     }
   }, [incomingCall, localStream, getMediaPermissions, storeAcceptCall]);
@@ -447,6 +459,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const setupCallEventHandlers = useCallback((call: MediaConnection) => {
     call.on('stream', (stream: MediaStream) => {
+      console.log('[CALL_STREAM] Received remote stream');
       setRemoteStream(stream);
       setStatus({ type: "in_call", remoteStream: stream });
       
@@ -461,6 +474,25 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
           }
         }
       }
+      
+      // Resume AudioContext when receiving stream
+      const resumeAudioContext = async () => {
+        try {
+          if (typeof AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined') {
+            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+            console.log('[CALL_STREAM] AudioContext state:', audioContext.state);
+            if (audioContext.state === 'suspended') {
+              await audioContext.resume();
+              console.log('[CALL_STREAM] AudioContext resumed successfully');
+            }
+          }
+        } catch (ctxError) {
+          console.warn('[CALL_STREAM] AudioContext resume failed:', ctxError);
+        }
+      };
+      
+      // Resume audio context immediately
+      resumeAudioContext();
       
       try {
         const audioTracks = stream.getAudioTracks();
@@ -494,37 +526,29 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         
         const playAudio = async () => {
           try {
+            // Resume AudioContext before playing
+            await resumeAudioContext();
             await remoteAudio.play();
             console.log('[AUDIO_DEBUG] Audio playback started successfully');
           } catch (playError) {
-            console.warn('[AUDIO_DEBUG] Auto-play failed:', playError);
+            console.warn('[AUDIO_DEBUG] Auto-play failed, will try on user interaction:', playError);
             
-            const enableAudioOnClick = () => {
-              remoteAudio.play()
-                .then(() => {
-                  console.log('[AUDIO_DEBUG] Audio enabled after user interaction');
-                  document.removeEventListener('click', enableAudioOnClick);
-                  document.removeEventListener('touchstart', enableAudioOnClick);
-                })
-                .catch(err => console.error('[AUDIO_DEBUG] Failed to play audio after interaction:', err));
+            const enableAudioOnClick = async () => {
+              try {
+                await resumeAudioContext();
+                await remoteAudio.play();
+                console.log('[AUDIO_DEBUG] Audio enabled after user interaction');
+              } catch (err) {
+                console.error('[AUDIO_DEBUG] Failed to play audio after interaction:', err);
+              }
             };
             
             document.addEventListener('click', enableAudioOnClick, { once: true });
             document.addEventListener('touchstart', enableAudioOnClick, { once: true });
-            
-            try {
-              if (typeof AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined') {
-                const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-                if (audioContext.state === 'suspended') {
-                  audioContext.resume();
-                }
-              }
-            } catch (ctxError) {
-              console.warn('[AUDIO_DEBUG] AudioContext error:', ctxError);
-            }
           }
         };
         
+        // Small delay to ensure audio element is ready
         setTimeout(playAudio, 100);
         
       } catch (error) {
@@ -533,10 +557,12 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     });
 
     call.on('close', () => {
+      console.log('[CALL_EVENT] Call closed');
       endCall();
     });
 
     call.on('error', (error: any) => {
+      console.error('[CALL_EVENT] Call error:', error);
       setStatus({ type: "error", error: error.message || "Call failed" });
       endCall();
     });
@@ -588,8 +614,29 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       connectionOpen: chatConn.current?.open,
       hasUserProfile: !!userProfile,
       messageLength: message?.length,
-      peerId: myPeerId
+      peerId: myPeerId,
+      currentCallPeer: currentCallPeerId.current
     });
+
+    // If we don't have a chat connection but we're in a call, try to establish one
+    if ((!chatConn.current || !chatConn.current.open) && currentCallPeerId.current && peerRef.current) {
+      console.log('[CHAT_SEND] No chat connection, attempting to establish one');
+      try {
+        const dataConn = peerRef.current.connect(currentCallPeerId.current, { label: "chat" });
+        chatConn.current = dataConn;
+        setupDataConnection(dataConn);
+        
+        // Wait a bit for connection to establish
+        setTimeout(() => {
+          if (dataConn.open) {
+            console.log('[CHAT_SEND] Chat connection established, retrying message send');
+            sendChatMessage(message, targetPeerId);
+          }
+        }, 1000);
+      } catch (error) {
+        console.error('[CHAT_SEND] Failed to establish chat connection:', error);
+      }
+    }
 
     if (!chatConn.current || !chatConn.current.open) {
       console.error('[CHAT_SEND] No chat connection available');

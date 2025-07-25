@@ -64,6 +64,24 @@ export function CallInterface() {
     
     console.log('[AUDIO_TOGGLE] Local audio toggled:', { newState, muted: !newState });
     
+    // Resume AudioContext on user interaction
+    const resumeAudioContext = async () => {
+      try {
+        if (typeof AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined') {
+          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+          console.log('[AUDIO_TOGGLE] AudioContext state:', audioContext.state);
+          if (audioContext.state === 'suspended') {
+            await audioContext.resume();
+            console.log('[AUDIO_TOGGLE] AudioContext resumed successfully');
+          }
+        }
+      } catch (error) {
+        console.warn('[AUDIO_TOGGLE] Failed to resume AudioContext:', error);
+      }
+    };
+    
+    resumeAudioContext();
+    
     try {
       const remoteAudio = document.getElementById('remote-audio') as HTMLAudioElement;
       if (remoteAudio) {
@@ -81,16 +99,6 @@ export function CallInterface() {
         }
       } else {
         console.warn('[AUDIO_TOGGLE] Remote audio element not found');
-      }
-      
-      if (typeof AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined') {
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        console.log('[AUDIO_TOGGLE] AudioContext state:', audioContext.state);
-        if (audioContext.state === 'suspended') {
-          audioContext.resume()
-            .then(() => console.log('[AUDIO_TOGGLE] AudioContext resumed'))
-            .catch(err => console.warn('[AUDIO_TOGGLE] Failed to resume AudioContext:', err));
-        }
       }
     } catch (error) {
       console.error('[AUDIO_TOGGLE] Error in audio toggle:', error);
@@ -118,8 +126,37 @@ export function CallInterface() {
   const contact = contacts.find(c => c.peerId === callerPeerId);
   const callerAvatar = contact?.avatar || incomingCall?.metadata?.callerAvatar;
 
+  // Handle click anywhere to resume audio context
+  const handleCallInterfaceClick = async () => {
+    try {
+      if (typeof AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined') {
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume();
+          console.log('[CALL_INTERFACE] AudioContext resumed on user interaction');
+        }
+      }
+      
+      // Also try to play the remote audio if it's paused
+      const remoteAudio = document.getElementById('remote-audio') as HTMLAudioElement;
+      if (remoteAudio && remoteAudio.paused && remoteAudio.srcObject) {
+        try {
+          await remoteAudio.play();
+          console.log('[CALL_INTERFACE] Remote audio resumed on user interaction');
+        } catch (err) {
+          console.warn('[CALL_INTERFACE] Failed to resume remote audio:', err);
+        }
+      }
+    } catch (error) {
+      console.warn('[CALL_INTERFACE] Failed to resume audio on interaction:', error);
+    }
+  };
+
   return (
-    <div className="fixed inset-0 bg-gradient-to-br from-white via-blue-50 to-blue-100 z-50 flex flex-col">
+    <div 
+      className="fixed inset-0 bg-gradient-to-br from-white via-blue-50 to-blue-100 z-50 flex flex-col"
+      onClick={handleCallInterfaceClick}
+    >
       <div className="bg-white bg-opacity-90 backdrop-blur-md border-b border-gray-200 text-gray-800 p-8 shadow-sm">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-6">
