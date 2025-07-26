@@ -439,6 +439,11 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     const customPeerId = `${finalName}_${timestamp}`;
 
     console.log('[PEER] Initializing peer with ID:', customPeerId);
+    console.log('[PEER] Current peer state:', { 
+      peerExists: !!peerRef.current,
+      userName: userProfile?.name,
+      config: PEER_CONFIG
+    });
 
     const peer = new Peer(customPeerId, PEER_CONFIG);
     peerRef.current = peer;
@@ -454,9 +459,11 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     peer.on('call', (call) => {
       console.log('[PEER] Incoming call from:', call.peer);
       
+      // Allow call to come through - don't auto-reject
       if (incomingCall) {
-        call.close();
-        return;
+        console.log('[PEER] Already have incoming call, replacing with new one');
+        // Close the old call
+        incomingCall.close();
       }
 
       setIncomingCall(call);
@@ -501,11 +508,13 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     });
 
     peer.on('disconnected', () => {
-      console.log('[PEER] Disconnected');
-      if (!incomingCall) {
-        setStatus({ type: "idle" });
-        setConnectionStatus('disconnected');
-      }
+      console.log('[PEER] Disconnected, attempting to reconnect...');
+      // Try to reconnect automatically
+      setTimeout(() => {
+        if (peerRef.current && !peerRef.current.destroyed) {
+          peerRef.current.reconnect();
+        }
+      }, 1000);
     });
 
     peer.on('close', () => {
@@ -525,7 +534,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       peer.destroy();
       peerRef.current = null;
     };
-  }, [userProfile?.name, incomingCall]);
+  }, [userProfile?.name]); // Removed incomingCall dependency - this was causing peer to reinitialize on every call!
 
   // Handle call stream events
   useEffect(() => {
