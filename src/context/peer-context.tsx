@@ -264,12 +264,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         return false;
       }
 
-      console.log('[MAKE_CALL] Establishing data connection for chat');
-      const dataConn = peerRef.current.connect(targetPeerId, { label: "chat" });
-      chatConn.current = dataConn;
-      setupDataConnection(dataConn);
-
-      console.log('[MAKE_CALL] Initiating call with stream:', {
+      console.log('[MAKE_CALL] Initiating call with stream (chat connection will be established after call connects):', {
         targetPeerId,
         audioTracks: stream.getAudioTracks().length,
         metadata: {
@@ -288,7 +283,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       });
 
       activeCallRef.current = call;
-      setIncomingCall(call);
+      // Don't set incomingCall for outgoing calls - this is the root cause of the issue
       setupCallEventHandlers(call);
       
       // Resume AudioContext when making a call
@@ -321,7 +316,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       setStatus({ type: "error", error: error.message || "Failed to make call" });
       return false;
     }
-  }, [userProfile, getMediaPermissions, addCallToHistory]);
+  }, [userProfile, initializeMedia, addCallToHistory]);
 
   const acceptCall = useCallback(async (): Promise<void> => {
     if (!incomingCall) {
@@ -364,17 +359,11 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
       currentCallPeerId.current = incomingCall.peer;
 
-      // Establish chat connection if not already connected
-      if (!chatConn.current && peerRef.current) {
-        console.log('[ACCEPT_CALL] Setting up chat connection');
-        const dataConn = peerRef.current.connect(incomingCall.peer, { label: "chat" });
-        chatConn.current = dataConn;
-        setupDataConnection(dataConn);
-      }
-
       storeAcceptCall();
       setStatus({ type: "in_call" });
       console.log('[ACCEPT_CALL] Call accepted, status set to in_call');
+      
+      // Don't clear incomingCall here - let it be managed in the call event handlers
       
     } catch (error: any) {
       console.error('[ACCEPT_CALL] Error accepting call:', error);
@@ -412,8 +401,10 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       activeCallRef.current = null;
     }
 
-    if (incomingCall && incomingCall !== activeCallRef.current) {
+    // Only close incomingCall if it exists and is different from activeCall
+    if (incomingCall) {
       incomingCall.close();
+      setIncomingCall(null);
     }
 
     if (chatConn.current) {
@@ -437,7 +428,6 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch (error) {
     }
 
-    setIncomingCall(null);
     setRemoteStream(null);
     setStatus({ type: "call_ended" });
     
@@ -458,10 +448,36 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
 
   const setupCallEventHandlers = useCallback((call: MediaConnection) => {
+    console.log('[SETUP_CALL_HANDLERS] Setting up event handlers for call:', {
+      callId: call.peer,
+      isIncoming: !!incomingCall,
+      currentStatus: status.type
+    });
+
     call.on('stream', (stream: MediaStream) => {
-      console.log('[CALL_STREAM] Received remote stream');
+      console.log('[CALL_STREAM] Received remote stream:', {
+        streamId: stream.id,
+        audioTracks: stream.getAudioTracks().length,
+        videoTracks: stream.getVideoTracks().length,
+        callPeer: call.peer
+      });
+      
       setRemoteStream(stream);
       setStatus({ type: "in_call", remoteStream: stream });
+      
+      // Establish chat connection after stream is received and stable
+      if (!chatConn.current && peerRef.current) {
+        console.log('[CALL_STREAM] Establishing chat connection after stream received');
+        setTimeout(() => {
+          try {
+            const dataConn = peerRef.current!.connect(call.peer, { label: "chat" });
+            chatConn.current = dataConn;
+            setupDataConnection(dataConn);
+          } catch (error) {
+            console.warn('[CALL_STREAM] Failed to establish chat connection:', error);
+          }
+        }, 1000); // Wait 1 second after stream is received
+      }
       
       if (!callStartTime.current) {
         callStartTime.current = new Date();
@@ -499,13 +515,22 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         console.log('[AUDIO_DEBUG] Setting up remote audio stream', {
           audioTracksCount: audioTracks.length,
           streamId: stream.id,
-          tracksEnabled: audioTracks.map(t => t.enabled)
+          tracksEnabled: audioTracks.map(t => t.enabled),
+          callPeer: call.peer
         });
         
+        // Remove any existing remote audio elements
         const existingAudio = document.getElementById('remote-audio') as HTMLAudioElement;
         if (existingAudio) {
+          console.log('[AUDIO_DEBUG] Removing existing remote audio element');
           existingAudio.srcObject = null;
           existingAudio.remove();
+        }
+        
+        // Only proceed if we have audio tracks
+        if (audioTracks.length === 0) {
+          console.warn('[AUDIO_DEBUG] No audio tracks in remote stream');
+          return;
         }
         
         const remoteAudio = document.createElement('audio');
@@ -566,7 +591,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       setStatus({ type: "error", error: error.message || "Call failed" });
       endCall();
     });
-  }, [endCall, contacts, updateCallHistory, setCallConnected]);
+  }, [endCall, contacts, updateCallHistory, setCallConnected, status.type, incomingCall]);
 
   const setupDataConnection = useCallback((conn: DataConnection) => {
     conn.on('open', () => {
@@ -600,10 +625,15 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
 
     conn.on('close', () => {
       console.log('[DATA_CONN] Data connection closed with peer:', conn.peer);
+      // Don't reset chatConn.current here as it might be needed for the call
     });
 
     conn.on('error', (error: any) => {
       console.error('[DATA_CONN] Data connection error:', error);
+      // Only reset chatConn.current if this is the current connection
+      if (chatConn.current === conn) {
+        chatConn.current = null;
+      }
     });
   }, []);
 
@@ -618,6 +648,16 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       currentCallPeer: currentCallPeerId.current
     });
 
+    if (!userProfile) {
+      console.error('[CHAT_SEND] No user profile available');
+      return false;
+    }
+
+    if (!message.trim()) {
+      console.error('[CHAT_SEND] Empty message');
+      return false;
+    }
+
     // If we don't have a chat connection but we're in a call, try to establish one
     if ((!chatConn.current || !chatConn.current.open) && currentCallPeerId.current && peerRef.current) {
       console.log('[CHAT_SEND] No chat connection, attempting to establish one');
@@ -626,30 +666,17 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
         chatConn.current = dataConn;
         setupDataConnection(dataConn);
         
-        // Wait a bit for connection to establish
-        setTimeout(() => {
-          if (dataConn.open) {
-            console.log('[CHAT_SEND] Chat connection established, retrying message send');
-            sendChatMessage(message, targetPeerId);
-          }
-        }, 1000);
+        // Return false immediately and let user try again after connection is established
+        console.log('[CHAT_SEND] Chat connection being established, please try sending message again in a moment');
+        return false;
       } catch (error) {
         console.error('[CHAT_SEND] Failed to establish chat connection:', error);
+        return false;
       }
     }
 
     if (!chatConn.current || !chatConn.current.open) {
       console.error('[CHAT_SEND] No chat connection available');
-      return false;
-    }
-
-    if (!userProfile) {
-      console.error('[CHAT_SEND] No user profile available');
-      return false;
-    }
-
-    if (!message.trim()) {
-      console.error('[CHAT_SEND] Empty message');
       return false;
     }
 
@@ -685,7 +712,7 @@ export const PeerProvider: React.FC<{ children: React.ReactNode }> = ({
       console.error('[CHAT_SEND] Failed to send message:', error);
       return false;
     }
-  }, [userProfile, myPeerId]);
+  }, [userProfile, myPeerId, setupDataConnection]);
 
 
   const createPeerWithRetry = useCallback((customPeerId: string, attempt: number = 0): Promise<Peer> => {
