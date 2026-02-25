@@ -1,6 +1,6 @@
 'use client';
 
-import { PeerProvider } from '@/context/peer-context';
+import { WebRTCProvider } from '@/context/webrtc-context';
 
 interface AppProvidersProps {
   children: React.ReactNode;
@@ -8,8 +8,8 @@ interface AppProvidersProps {
 
 export function AppProviders({ children }: AppProvidersProps) {
   return (
-    <PeerProvider>
+    <WebRTCProvider>
       {children}
-    </PeerProvider>
+    </WebRTCProvider>
   );
 }
