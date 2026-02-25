@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: ./apps/server/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+    networks:
+      - nocap-network
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: ./apps/web/Dockerfile
+    ports:
+      - "3005:3005"
+    environment:
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8080
+      - PORT=3005
+    depends_on:
+      - server
+    networks:
+      - nocap-network
+    restart: unless-stopped
+
+networks:
+  nocap-network:
+    driver: bridge
