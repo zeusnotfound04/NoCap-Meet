@@ -7,8 +7,8 @@ services:
       dockerfile: ./apps/server/Dockerfile
     ports:
       - "8080:8080"
-    environment:
-      - PORT=8080
+    env_file:
+      - ./apps/server/.env
     networks:
       - nocap-network
     restart: unless-stopped
@@ -19,9 +19,8 @@ services:
       dockerfile: ./apps/web/Dockerfile
     ports:
       - "3005:3005"
-    environment:
-      - NEXT_PUBLIC_WS_URL=ws://localhost:8080
-      - PORT=3005
+    env_file:
+      - ./apps/web/.env
     depends_on:
       - server
     networks:
